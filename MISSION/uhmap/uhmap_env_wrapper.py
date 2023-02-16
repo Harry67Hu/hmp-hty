@@ -115,6 +115,8 @@ class ScenarioConfig(object):
 
     obs_vec_length = get_subtask_conf(UnrealLevel).obs_vec_length
     obs_vec_length_cv = ChainVar(lambda UnrealLevel:get_subtask_conf(UnrealLevel).obs_vec_length, chained_with=['SubTaskSelection'])
+    MAX_NUM_OPP_OBS = 5
+    MAX_NUM_ALL_OBS = 5
 
     obs_n_entity = get_subtask_conf(UnrealLevel).obs_n_entity
     obs_n_entity_cv = ChainVar(lambda UnrealLevel:get_subtask_conf(UnrealLevel).obs_n_entity, chained_with=['SubTaskSelection'])

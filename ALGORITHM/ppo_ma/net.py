@@ -70,6 +70,7 @@ class Net(nn.Module):
 
     def _act(self, obs=None, test_mode=None, eval_mode=False, eval_actions=None, avail_act=None, agent_ids=None, eprsn=None):
         eval_act = eval_actions if eval_mode else None
+        assert AlgorithmConfig.n_entity_placeholder == obs.shape[-2], 'Check n_entity'
         others = {}
         if self.use_normalization:
             if torch.isnan(obs).all(): pass

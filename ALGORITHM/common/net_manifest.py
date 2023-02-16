@@ -35,6 +35,10 @@ def weights_init(m):
         'HyperNet':None,
         'MyHyperNet':None,
         'DivTree':None,
+        'E_GAT':None,
+        'I_GAT':None,
+        'GRUCell':None,
+
     }
 
     classname = m.__class__.__name__

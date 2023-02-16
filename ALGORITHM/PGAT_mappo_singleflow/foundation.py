@@ -17,9 +17,27 @@ class AlgorithmConfig:
     TakeRewardAsUnity = False
     use_normalization = True
     add_prob_loss = False
-    n_entity_placeholder = 10
+    wait_norm_stable = True
+
     load_checkpoint = False
     load_specific_checkpoint = ''
+
+    # observation pre-process part
+    use_obs_pro_uhmp = False    # 是否使用特征工程（UHMP）
+    obs_process_h_dim = 32
+
+    # obs-act abstract net part
+    act_dim = 64
+    rnn_h_dim = 64
+    obs_abs_h_dim = 128
+    act_abs_h_dim = 128
+
+    # PGAT Net part
+    obs_h_dim = 64
+    adv_h_dim = 64
+    GAT_h_dim = 64
+    H_E_dim = 32
+    H_I_dim = 32
 
     # PPO part
     clip_param = 0.2
@@ -43,14 +61,11 @@ class AlgorithmConfig:
     
     dual_conc = True
 
-    n_entity_placeholder = 'auto load, do not change'
+    n_entity_placeholder = 11
     n_agent = 'auto load, do not change'
     entity_distinct = 'auto load, do not change'
 
     ConfigOnTheFly = True
-
-
-    
 
     policy_resonance = False
 
@@ -81,6 +96,12 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
 
         # change obs format, e.g., converting dead agent obs into NaN
         self.shell_env = ShellEnvWrapper(n_agent, n_thread, space, mcv, self, AlgorithmConfig, GlobalConfig.ScenarioConfig, self.team)
+
+        # heterogeneous agent types
+        agent_type_list = [a['type'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
+        self.HeteAgentType = str_array_to_num(agent_type_list)
+        hete_type = np.array(self.HeteAgentType)[self.ScenarioConfig.AGENT_ID_EACH_TEAM[team]]
+        self.type_mask = (hete_type[:, np.newaxis] == hete_type[np.newaxis, :]).astype(np.int) # [n_agent, n_agent]第一个维度为智能体数目维度
 
         n_actions = len(self.shell_env.action_converter.dictionary_args)
 
@@ -117,8 +138,9 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
 
 
     def action_making(self, StateRecall, test_mode):
-        # make sure hook is cleared
-        assert ('_hook_' not in StateRecall)
+        assert ('_hook_' not in StateRecall), ('Make sure hook is cleared')
+        assert StateRecall['obs'] is not None, ('Make sure obs is ok')
+        RST = StateRecall['Env-Suffered-Reset'] if 'Env-Suffered-Reset' in StateRecall else np.array([0])
         
         # read obs
         obs, threads_active_flag, avail_act, eprsn = \
@@ -135,13 +157,36 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         eprsn = repeat_at(eprsn, -1, self.n_agent)
         thread_index = np.arange(self.n_thread)[threads_active_flag]
 
+        # Message and action control
+        if '_OBS_Message_' not in StateRecall or RST.all():
+            shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.obs_h_dim]
+            message_obs = np.random.rand(*shape)
+            StateRecall['_OBS_Message_'] = message_obs
+            shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.adv_h_dim]
+            message_adv = np.random.rand(*shape)
+            StateRecall['_ADV_Message_'] = message_adv
+        if '_action_' not in StateRecall or RST.all():
+            shape = [obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim]
+            StateRecall['_action_'] = np.random.rand(*shape)
+
         # make decision
         with torch.no_grad():
-            action, value, action_log_prob = self.policy.act(obs=obs,
+            action, value, action_log_prob, message_obs, message_adv = self.policy.act(obs=obs,
+                                                             act=StateRecall['_action_'],
+                                                             message_obs=StateRecall['_OBS_Message_'],
+                                                             message_adv=StateRecall['_ADV_Message_'],
+                                                             type_mask=self.type_mask,
                                                              test_mode=test_mode,
                                                              avail_act=avail_act,
                                                              eprsn=eprsn,
                                                              )
+
+        StateRecall['_OBS_Message_'] = message_obs
+        StateRecall['_ADV_Message_'] = message_adv
+
+        assert AlgorithmConfig.act_dim > 50, 'action_dim check'
+        action_one_hot = np.eye(AlgorithmConfig.act_dim)[action.flatten()].reshape(obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim)
+        StateRecall['_action_'] = action_one_hot
 
         # commit obs to buffer, vars named like _x_ are aligned, others are not!
         traj_framefrag = {
@@ -153,6 +198,8 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
             "action":        action,
         }
         if avail_act is not None: traj_framefrag.update({'avail_act':  avail_act})
+
+
         # deal with rollout later when the reward is ready, leave a hook as a callback here
         if not test_mode: StateRecall['_hook_'] = self.commit_traj_frag(traj_framefrag, req_hook = True)
         return action.copy(), StateRecall

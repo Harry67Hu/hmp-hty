@@ -106,8 +106,8 @@ class UhmapHuge(UhmapCommonFn, UhmapEnv):
 
         # temporary parameters
         OBS_RANGE_PYTHON_SIDE = 1500
-        MAX_NUM_OPP_OBS = 5
-        MAX_NUM_ALL_OBS = 5
+        MAX_NUM_OPP_OBS = ScenarioConfig.MAX_NUM_OPP_OBS
+        MAX_NUM_ALL_OBS = ScenarioConfig.MAX_NUM_ALL_OBS
         
         # get and calculate distance array
         pos3d_arr = np.zeros(shape=(self.n_agents, 3), dtype=np.float32)
