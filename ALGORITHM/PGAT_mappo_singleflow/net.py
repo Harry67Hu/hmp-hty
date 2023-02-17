@@ -260,6 +260,7 @@ class Net(nn.Module):
 
         obs = torch.nan_to_num_(obs, 0)         # replace dead agents' obs, from NaN to 0  obs [n_threads, n_agents, n_entity, rawob_dim]
         assert type_mask is not None, 'type_mask wrong'
+        # E_Het_mask  = torch.ones(obs.shape[0], obs.shape[1], self.n_agent)
         E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
         # I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
 
@@ -317,7 +318,7 @@ class Net(nn.Module):
 
         message_obs_output = h_obs 
         # message_adv_output = h_adv
-        message_adv_output = None
+        message_adv_output = h_obs
 
 
         if not eval_mode: return act, value, actLogProbs, message_obs_output, message_adv_output

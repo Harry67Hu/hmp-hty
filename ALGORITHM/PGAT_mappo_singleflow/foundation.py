@@ -168,7 +168,9 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         if '_action_' not in StateRecall or RST.all():
             shape = [obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim]
             StateRecall['_action_'] = np.random.rand(*shape)
-
+        
+        target_shape = (obs.shape[0],self.type_mask.shape[0], self.type_mask.shape[1])
+        type_mask_expanded = np.broadcast_to(self.type_mask[np.newaxis, :, :], target_shape)
         # make decision
         with torch.no_grad():
             action, value, action_log_prob, message_obs, message_adv = self.policy.act(obs=obs,
@@ -180,21 +182,28 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
                                                              avail_act=avail_act,
                                                              eprsn=eprsn,
                                                              )
-
-        StateRecall['_OBS_Message_'] = message_obs
-        StateRecall['_ADV_Message_'] = message_adv
+        # 如果是分别训练的版本，需要在此处对message信息进行整合[先拼接起来再repeat_at]
+        assert True, ('总训练的版本而非分别训练')
+        StateRecall['_OBS_Message_'] = repeat_at(message_obs, 1, obs.shape[1])
+        StateRecall['_ADV_Message_'] = repeat_at(message_adv, 1, obs.shape[1])
 
         assert AlgorithmConfig.act_dim > 50, 'action_dim check'
         action_one_hot = np.eye(AlgorithmConfig.act_dim)[action.flatten()].reshape(obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim)
         StateRecall['_action_'] = action_one_hot
 
         # commit obs to buffer, vars named like _x_ are aligned, others are not!
+ 
         traj_framefrag = {
             "_SKIP_":        ~threads_active_flag,
             "value":         value,
             "avail_act":     avail_act,
             "actionLogProb": action_log_prob,
-            "obs":           obs,
+            "message_obs":   StateRecall['_OBS_Message_'],
+            "message_adv":   StateRecall['_ADV_Message_'],
+            "action_code":   StateRecall['_action_'],
+            "type_mask":     type_mask_expanded,
+            "obs":           obs, 
+
             "action":        action,
         }
         if avail_act is not None: traj_framefrag.update({'avail_act':  avail_act})
