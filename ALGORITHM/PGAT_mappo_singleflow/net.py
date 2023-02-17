@@ -68,7 +68,7 @@ class E_GAT(nn.Module):
         E = self.a(H_cat)                               # （n_agent, 1）
         E = self.act(E)
         E_mask = E * mask.unsqueeze(-1) 
-        alpha = F.softmax(E_mask, dim=0)                    # （n_agent, 1）
+        alpha = F.softmax(E_mask, dim=-2)                    # （n_agent, 1）
         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
 
         weighted_sum = torch.mul(alpha_mask, H).sum(dim=-2)  #  (hidden_dim）
@@ -230,8 +230,6 @@ class Net(nn.Module):
 
         # self.weights = torch.pow(2, torch.arange(10, dtype=torch.float32)).to(GlobalConfig.device) 
         # self.Temp = torch.zeros_like(UID).to(GlobalConfig.device)
-
-
         return
     
     @Args2tensor_Return2numpy
@@ -403,7 +401,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
-        # 生成最终掩码
+        # 生成最终掩码 [n_threads, n_agents, n_agent]
+        # 传递信息为[[n_threads, n_agent, n_agent]]
+
         # UID信息(移除非同队伍agent)*type_mask
         n_threads, n_agents, n_entity, _ = obs.shape
         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目

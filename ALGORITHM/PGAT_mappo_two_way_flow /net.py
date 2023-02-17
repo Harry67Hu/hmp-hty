@@ -30,7 +30,7 @@ class E_GAT(nn.Module):
         self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
         self.a = nn.Linear(hidden_dim*2, 1, bias=False)
         self.act = nn.LeakyReLU(negative_slope=0.2)
-        # self.out_attn = nn.Linear(hidden_dim, output_dim)
+        self.out_attn = nn.Linear(hidden_dim, output_dim)
 
 
         # 多头的遗弃版本
@@ -50,6 +50,7 @@ class E_GAT(nn.Module):
         # message维度为[n_agent, input_dim]   
         # mask维度为[n_agent]    e.g: mask = torch.randint(0,2, (n_agent,))  
         # MASK  mask 只保留距离内的 + 同类的，排除掉自己
+        mask = torch.tensor(mask).to(GlobalConfig.device)
         # OBS [n_entity, input_dim] 用作知识直接提取信息
 
         # n_agent = message.shape[0]
@@ -67,12 +68,12 @@ class E_GAT(nn.Module):
         E = self.a(H_cat)                               # （n_agent, 1）
         E = self.act(E)
         E_mask = E * mask.unsqueeze(-1) 
-        alpha = F.softmax(E_mask, dim=0)                    # （n_agent, 1）
+        alpha = F.softmax(E_mask, dim=-2)                    # （n_agent, 1）
         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
 
         weighted_sum = torch.mul(alpha_mask, H).sum(dim=-2)  #  (hidden_dim）
-        # H_E = self.out_attn(h + weighted_sum)
-        H_E = F.elu(h + weighted_sum)
+        H_E = self.out_attn(h + weighted_sum)
+        H_E = F.elu(H_E)
 
         return H_E
 
@@ -205,10 +206,11 @@ class Net(nn.Module):
         self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
         self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
         self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
-        self.AT_I_Het_GAT = I_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_I_dim)
+        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
 
 
         self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
         
         self.AT_policy_head = nn.Sequential(
             nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
@@ -226,10 +228,8 @@ class Net(nn.Module):
         # 知识部分的参数
         self.n_agent = AlgorithmConfig.n_agent
 
-        self.weights = torch.pow(2, torch.arange(10, dtype=torch.float32)).to(GlobalConfig.device)
+        # self.weights = torch.pow(2, torch.arange(10, dtype=torch.float32)).to(GlobalConfig.device) 
         # self.Temp = torch.zeros_like(UID).to(GlobalConfig.device)
-
-
         return
     
     @Args2tensor_Return2numpy
@@ -257,7 +257,8 @@ class Net(nn.Module):
         mask_dead = torch.isnan(obs).any(-1)    # find dead agents
 
         obs = torch.nan_to_num_(obs, 0)         # replace dead agents' obs, from NaN to 0  obs [n_threads, n_agents, n_entity, rawob_dim]
-
+        assert type_mask is not None, 'type_mask wrong'
+        # E_Het_mask  = torch.ones(obs.shape[0], obs.shape[1], self.n_agent)  # 不使用复杂计算的消融实验
         E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
         I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
 
@@ -279,14 +280,11 @@ class Net(nn.Module):
         # 环境策略建议部分
         abstract_obs = self.AT_obs_abstractor(obs)
         abstract_act = self.AT_act_abstractor(act)
-
         abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
         gru_input = F.relu(self.fc1_rnn(abstract_cat))
 
-        if self.gru_cell_memory is None:
-            self.gru_cell_memory = self.gru(gru_input)
-        else:
-            self.gru_cell_memory = self.gru(gru_input, self.gru_cell_memory)
+        self.gru_cell_memory = torch.randn(gru_input.shape).to(GlobalConfig.device) if self.gru_cell_memory is None else self.gru_cell_memory # 为了简化，这里默认GRU的输入维度和隐层维度是一样的
+        self.gru_cell_memory = self.gru(gru_input, self.gru_cell_memory)
         h_adv = self.fc2_rnn(self.gru_cell_memory)
 
 
@@ -294,33 +292,32 @@ class Net(nn.Module):
         H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
         H_I = self.AT_I_Het_GAT(h_adv, message_adv, I_Het_mask)
         H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
+        # H_sum = self.AT_PGAT_mlp(H_E)
     
         # 策略网络部分
         logits = self.AT_policy_head(H_sum)
 
-        # # motivation objectives
-        if eval_mode: 
-            # threat = self.CT_get_threat(v_M_fuse)
-            value = self.CT_get_value(H_sum)
-            # others['threat'] = self.re_scale(threat, limit=12)
-            others['value'] = value
+        # Critic网络部分
+        value = self.CT_get_value(H_sum)
+            
             
         logit2act = self._logit2act
         if self.use_policy_resonance and self.is_resonance_active():
             logit2act = self._logit2act_rsn
             
         act, actLogProbs, distEntropy, probs = logit2act(   logits, eval_mode=eval_mode,
-                                                            test_mode=(test_mode or self.static), 
+                                                            test_mode=test_mode, 
                                                             eval_actions=eval_act, 
                                                             avail_act=avail_act,
                                                             eprsn=eprsn)
 
         message_obs_output = h_obs 
         message_adv_output = h_adv
+        # message_adv_output = h_obs
 
 
-        if not eval_mode: return act, 'vph', actLogProbs, message_obs_output, message_adv_output
-        else:             return 'vph', actLogProbs, distEntropy, probs, others, message_obs_output, message_adv_output
+        if not eval_mode: return act, value, actLogProbs, message_obs_output, message_adv_output
+        else:             return value, actLogProbs, distEntropy, probs, others, message_obs_output, message_adv_output
 
 
     def _logit2act_rsn(self, logits_agent_cluster, eval_mode, test_mode, eval_actions=None, avail_act=None, eprsn=None):
@@ -371,9 +368,9 @@ class Net(nn.Module):
     
     def get_E_Het_mask_uhmp(self, obs, type_mask, dead_mask):
         # type_mask [n_agent, n_agent]
-        type_mask = type_mask.cpu().numpy()
+        type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask
         # dead_mask [n_threads, n_agents, n_entity]
-        dead_mask = dead_mask.cpu().numpy()
+        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask
         # obs[n_threads, n_agents, n_entity, state_dim]
         obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()
         assert obs.shape[-1] == self.rawob_dim, '错误的观测信息，应该为没有经过预处理的信息！'
@@ -401,7 +398,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
-        # 生成最终掩码
+        # 生成最终掩码 [n_threads, n_agents, n_agent]
+        # 传递信息为[[n_threads, n_agent, n_agent]]
+
         # UID信息(移除非同队伍agent)*type_mask
         n_threads, n_agents, n_entity, _ = obs.shape
         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目
@@ -425,9 +424,12 @@ class Net(nn.Module):
   
         return self.get_I_Het_mask_uhmp(obs=obs, type_mask=type_mask, dead_mask=dead_mask)
     
+   
     def get_I_Het_mask_uhmp(self, obs, type_mask, dead_mask):
         # type_mask [n_agent, n_agent]
-        type_mask = type_mask.cpu().numpy()
+        type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask
+        # dead_mask [n_threads, n_agents, n_entity]
+        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask
         # obs[n_threads, n_agents, n_entity, state_dim]
         obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()
         assert obs.shape[-1] == self.rawob_dim, '错误的观测信息，应该为没有经过预处理的信息！'
@@ -455,7 +457,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
-        # 生成最终掩码
+        # 生成最终掩码 [n_threads, n_agents, n_agent]
+        # 传递信息为[[n_threads, n_agent, n_agent]]
+
         # UID信息(移除非同队伍agent)*type_mask
         n_threads, n_agents, n_entity, _ = obs.shape
         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目
@@ -466,9 +470,7 @@ class Net(nn.Module):
                     if M: # 【移除非同队伍agent】
                         # if type_mask[int(s_UID[i,j]), int(UID[i,j,m])]==1:  # 【type_mask 移除非同类型agent】
                         output[i,j,int(UID[i,j,m])] = 0 if int(s_UID[i,j])==int(UID[i,j,m]) else 1 # 【排除自己】
-
         return output
-
 
 
 

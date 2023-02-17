@@ -33,9 +33,9 @@ class AlgorithmConfig:
     act_abs_h_dim = 128
 
     # PGAT Net part
-    obs_h_dim = 64
-    adv_h_dim = 64
-    GAT_h_dim = 64
+    obs_h_dim = 32
+    adv_h_dim = 32
+    GAT_h_dim = 32
     H_E_dim = 32
     H_I_dim = 32
 
@@ -97,11 +97,20 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         # change obs format, e.g., converting dead agent obs into NaN
         self.shell_env = ShellEnvWrapper(n_agent, n_thread, space, mcv, self, AlgorithmConfig, GlobalConfig.ScenarioConfig, self.team)
 
-        # heterogeneous agent types
+        # heterogeneous agent types & type_mask
         agent_type_list = [a['type'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
         self.HeteAgentType = str_array_to_num(agent_type_list)
         hete_type = np.array(self.HeteAgentType)[self.ScenarioConfig.AGENT_ID_EACH_TEAM[team]]
         self.type_mask = (hete_type[:, np.newaxis] == hete_type[np.newaxis, :]).astype(np.int) # [n_agent, n_agent]第一个维度为智能体数目维度
+
+        # team mask
+        # agent_team_list = [a['team'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
+        # team_list_expand = np.expand_dims(agent_team_list, axis=1)
+        # team_list_expand = np.tile(team_list_expand, reps=(1, len(agent_team_list)))
+        # B = np.transpose(team_list_expand)
+        # C = np.equal(team_list_expand, B)
+        # self.team_mask = C.astype(int)
+
 
         n_actions = len(self.shell_env.action_converter.dictionary_args)
 

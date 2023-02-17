@@ -33,9 +33,9 @@ class AlgorithmConfig:
     act_abs_h_dim = 128
 
     # PGAT Net part
-    obs_h_dim = 64
-    adv_h_dim = 64
-    GAT_h_dim = 64
+    obs_h_dim = 32
+    adv_h_dim = 32
+    GAT_h_dim = 32
     H_E_dim = 32
     H_I_dim = 32
 
@@ -97,11 +97,20 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         # change obs format, e.g., converting dead agent obs into NaN
         self.shell_env = ShellEnvWrapper(n_agent, n_thread, space, mcv, self, AlgorithmConfig, GlobalConfig.ScenarioConfig, self.team)
 
-        # heterogeneous agent types
+        # heterogeneous agent types & type_mask
         agent_type_list = [a['type'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
         self.HeteAgentType = str_array_to_num(agent_type_list)
         hete_type = np.array(self.HeteAgentType)[self.ScenarioConfig.AGENT_ID_EACH_TEAM[team]]
         self.type_mask = (hete_type[:, np.newaxis] == hete_type[np.newaxis, :]).astype(np.int) # [n_agent, n_agent]第一个维度为智能体数目维度
+
+        # team mask
+        # agent_team_list = [a['team'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
+        # team_list_expand = np.expand_dims(agent_team_list, axis=1)
+        # team_list_expand = np.tile(team_list_expand, reps=(1, len(agent_team_list)))
+        # B = np.transpose(team_list_expand)
+        # C = np.equal(team_list_expand, B)
+        # self.team_mask = C.astype(int)
+
 
         n_actions = len(self.shell_env.action_converter.dictionary_args)
 
@@ -168,7 +177,9 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         if '_action_' not in StateRecall or RST.all():
             shape = [obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim]
             StateRecall['_action_'] = np.random.rand(*shape)
-
+        
+        target_shape = (obs.shape[0],self.type_mask.shape[0], self.type_mask.shape[1])
+        type_mask_expanded = np.broadcast_to(self.type_mask[np.newaxis, :, :], target_shape)
         # make decision
         with torch.no_grad():
             action, value, action_log_prob, message_obs, message_adv = self.policy.act(obs=obs,
@@ -180,21 +191,28 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
                                                              avail_act=avail_act,
                                                              eprsn=eprsn,
                                                              )
-
-        StateRecall['_OBS_Message_'] = message_obs
-        StateRecall['_ADV_Message_'] = message_adv
+        # 如果是分别训练的版本，需要在此处对message信息进行整合[先拼接起来再repeat_at]
+        assert True, ('总训练的版本而非分别训练')
+        StateRecall['_OBS_Message_'] = repeat_at(message_obs, 1, obs.shape[1])
+        StateRecall['_ADV_Message_'] = repeat_at(message_adv, 1, obs.shape[1])
 
         assert AlgorithmConfig.act_dim > 50, 'action_dim check'
         action_one_hot = np.eye(AlgorithmConfig.act_dim)[action.flatten()].reshape(obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim)
         StateRecall['_action_'] = action_one_hot
 
         # commit obs to buffer, vars named like _x_ are aligned, others are not!
+ 
         traj_framefrag = {
             "_SKIP_":        ~threads_active_flag,
             "value":         value,
             "avail_act":     avail_act,
             "actionLogProb": action_log_prob,
-            "obs":           obs,
+            "message_obs":   StateRecall['_OBS_Message_'],
+            "message_adv":   StateRecall['_ADV_Message_'],
+            "action_code":   StateRecall['_action_'],
+            "type_mask":     type_mask_expanded,
+            "obs":           obs, 
+
             "action":        action,
         }
         if avail_act is not None: traj_framefrag.update({'avail_act':  avail_act})
