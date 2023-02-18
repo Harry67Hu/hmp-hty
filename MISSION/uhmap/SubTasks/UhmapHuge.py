@@ -149,7 +149,7 @@ class UhmapHuge(UhmapCommonFn, UhmapEnv):
             obs_arr.append(
                 agent.vel3d
             )
-            obs_arr.append([
+            obs_arr.append([ # [20,21,22]
                 agent.hp,
                 agent.yaw,
                 agent.max_speed,
@@ -264,6 +264,7 @@ class UhmapHuge(UhmapCommonFn, UhmapEnv):
             ])
         OBS_GameObj = my_view(obs_arr.get(), [len(self.key_obj), -1])[:MAX_OBJ_NUM_ACCEPT, :]
         OBS_GameObj = repeat_at(OBS_GameObj, insert_dim=0, n_times=self.n_agents)
+        OBS_GameObj = np.zeros_like(OBS_GameObj)
         OBS_ALL_AGENTS = np.concatenate((OBS_ALL_AGENTS, OBS_GameObj), axis=1)
 
         return OBS_ALL_AGENTS

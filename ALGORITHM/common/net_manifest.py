@@ -5,6 +5,10 @@ def weights_init(m):
         nn.init.orthogonal_(m.weight.data)
         if final_layer:nn.init.orthogonal_(m.weight.data, gain=0.01)
         if m.bias is not None: nn.init.uniform_(m.bias.data, a=-0.02, b=0.02)
+    def init_parameters(self):
+        for param in self.parameters():
+            stdv = 1. / math.sqrt(param.size(-1))
+            param.data.uniform_(-stdv, stdv)
 
     initial_fn_dict = {
         'Net': None,

@@ -68,7 +68,7 @@ class Runner(object):
             self.info_runner = self.update_runner(done, obs, reward, info)
             toc=time.time(); dt = toc-tic; tic = toc
             if self.hb_on: print('\r [task runner]: FPS %d, episode steping %s       '%(
-                self.get_fps(dt), self.heartbeat()), end='', flush=True)
+                self.get_fps(dt), self.heartbeat(style=2)), end='', flush=True)
             if self._exit_early_: print('exit_early'); break
         # All task done! Time to shut down
         return

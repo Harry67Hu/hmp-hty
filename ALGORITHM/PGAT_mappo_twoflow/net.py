@@ -39,11 +39,14 @@ class E_GAT(nn.Module):
         # self.attn_head = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(n_heads)])
         # self.out_attn = nn.Linear(n_heads * hidden_dim, output_dim)
 
+        self.init_parameters()
+
 
     def init_parameters(self):
-        for param in self.parameters():
-            stdv = 1. / math.sqrt(param.size(-1))
-            param.data.uniform_(-stdv, stdv)
+        param = self.W
+        # for param in self.parameters():
+        stdv = 1. / math.sqrt(param.size(-1))
+        param.data.uniform_(-stdv, stdv)
     
     def forward(self, h, message, mask):
         # h维度为[input_dim]   
@@ -70,72 +73,16 @@ class E_GAT(nn.Module):
         E_mask = E * mask.unsqueeze(-1) 
         alpha = F.softmax(E_mask, dim=-2)                    # （n_agent, 1）
         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
+        # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
+        alpha_mask = torch.nan_to_num(alpha_mask, 0)
 
         weighted_sum = torch.mul(alpha_mask, H).sum(dim=-2)  #  (hidden_dim）
         H_E = self.out_attn(h + weighted_sum)
         H_E = F.elu(H_E)
+        assert not torch.isnan(H_E).any(), ('nan problem!')
 
         return H_E
 
-class I_GAT(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1, version=2):
-        super(I_GAT, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
-        self.n_heads = n_heads
-        self.version = version
-
-        assert n_heads == 1, '目前还没有涉及多头的形式!'
-        assert version == 2, '目前只有version2的形式! version2指adv信息直接用作权重计算'
-
-        # Version==1: 根据OA直接生成mask
-        # Version==2: 与E_GAT共享mask, 但是weighted_sum的权重根据OA进行计算而不是Wh TODO 这里的推导明显有问题
-
-        
-        # 不采用多头的形式
-        self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
-        self.a = nn.Linear(hidden_dim*2, 1, bias=False)
-        self.act = nn.LeakyReLU(negative_slope=0.2)
-        # self.out_attn = nn.Linear(hidden_dim, output_dim)
-
-
-    def init_parameters(self):
-        for param in self.parameters():
-            stdv = 1. / math.sqrt(param.size(-1))
-            param.data.uniform_(-stdv, stdv)
-    
-    def forward(self, h, message, mask):
-        if self.version == 2:
-            return self.forward_version2(h, message, mask)
-
-    def forward_version2(self, h, message, mask):
-        # h        [input_dim]   
-        # Message  [n_agent, input_dim]   
-        # mask     [n_agent]    e.g: mask = torch.randint(0,2, (n_agent,))  
-        # MASK  mask 只保留距离内的 + 同类的，排除掉自己
-        n_agent = message.shape[0]
-
-        # 自身信息
-        h = torch.matmul(h, self.W)                #  (hidden_dim）
-        h_repeat = repeat_at(h, 0, n_agent)         #  (n_agent, hidden_dim）
-
-        # 接收到的观测信息（理论上应该是mask掉的，但是此处没有）
-        H = torch.matmul(message, self.W)          # （n_agent, hidden_dim）
-        
-        # 求权重(记得最后还得mask一遍)
-        H_cat = torch.cat((h_repeat, H), dim=-1)   # （n_agent, hidden_dim * 2）
-        E = self.a(H_cat)                               # （n_agent, 1）
-        E = self.act(E)
-        E_mask = E * mask.unsqueeze(-1) 
-        alpha = F.softmax(E_mask, dim=0)                    # （n_agent, 1）
-        alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
-
-        weighted_sum = torch.mul(alpha_mask, H).sum(dim=0)  #  (hidden_dim）
-        # H_E = self.out_attn(h + weighted_sum)
-        H_E = F.elu(h + weighted_sum)
-
-        return H_E
 
 
 
@@ -175,8 +122,6 @@ class Net(nn.Module):
 
         
 
-
-
         # observation normalization
         if self.use_normalization:
             self._batch_norm = DynamicNormFix(rawob_dim, only_for_last_dim=True, exclude_one_hot=True, exclude_nan=True)
@@ -196,10 +141,10 @@ class Net(nn.Module):
             self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
 
         # actor network construction ***
-            # 1st flow
+        # 1st flow
             # self.AT_obs_encoder
         self.AT_E_Het_GAT = E_GAT(input_dim=obs_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
-            # 2nd flow
+        # 2nd flow
             # self.AT_obs_abstractor
             # self.AT_act_abstractor
         self.gru_cell_memory = None
@@ -207,8 +152,7 @@ class Net(nn.Module):
         self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
         self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
         self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
-
-
+        # together
         self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
         # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
         
@@ -216,7 +160,6 @@ class Net(nn.Module):
             nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
             nn.Linear(h_dim, h_dim//2), nn.ReLU(inplace=True),
             nn.Linear(h_dim//2, self.n_action))
-
 
         # critic network construction ***
         self.CT_get_value = nn.Sequential(nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
@@ -228,8 +171,6 @@ class Net(nn.Module):
         # 知识部分的参数
         self.n_agent = AlgorithmConfig.n_agent
 
-        # self.weights = torch.pow(2, torch.arange(10, dtype=torch.float32)).to(GlobalConfig.device) 
-        # self.Temp = torch.zeros_like(UID).to(GlobalConfig.device)
         return
     
     @Args2tensor_Return2numpy
@@ -283,10 +224,11 @@ class Net(nn.Module):
         abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
         gru_input = F.relu(self.fc1_rnn(abstract_cat))
 
-        self.gru_cell_memory = torch.randn(gru_input.shape).to(GlobalConfig.device) if self.gru_cell_memory is None else self.gru_cell_memory # 为了简化，这里默认GRU的输入维度和隐层维度是一样的
-        self.gru_cell_memory = self.gru(gru_input, self.gru_cell_memory)
+            # GRU此处处理的时候先碾平再恢复原有形状
+        gru_input_expand = gru_input.view(gru_input.shape[0]*gru_input.shape[1], gru_input.shape[2])
+        self.gru_cell_memory = self.gru(gru_input_expand)
+        self.gru_cell_memory = self.gru_cell_memory.view(gru_input.shape)
         h_adv = self.fc2_rnn(self.gru_cell_memory)
-
 
         # PGAT部分
         H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
@@ -367,30 +309,21 @@ class Net(nn.Module):
         return self.get_E_Het_mask_uhmp(obs=obs, type_mask=type_mask, dead_mask=dead_mask)
     
     def get_E_Het_mask_uhmp(self, obs, type_mask, dead_mask):
-        # type_mask [n_agent, n_agent]
-        type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask
-        # dead_mask [n_threads, n_agents, n_entity]
-        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask
-        # obs[n_threads, n_agents, n_entity, state_dim]
-        obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()
+        # uhmp部分对obs进行了切片[self=0, allay=1~int(n_entity_placeholder/2), enemy=int(n_entity_placeholder/2)~-2, wall=-1]
+        type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask  # type_mask [n_agent, n_agent]
+        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask  # dead_mask [n_threads, n_agents, n_entity]
+        obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()    # obs[n_threads, n_agents, n_entity, state_dim]
         assert obs.shape[-1] == self.rawob_dim, '错误的观测信息，应该为没有经过预处理的信息！'
-
-        zs, ze = self.div_entity(obs, type=[(0,), range(1, self.n_entity_placeholder)], n=self.n_entity_placeholder)
+        # 由于此处只考虑队友通信，故将enemy和wall的信息放到了不用的Other里面
+        zs, ally, other = self.div_entity(obs, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder)
         # zs [n_threads, n_agents, 1, state_dim]
-        # ze [n_threads, n_agents, n_entity-1, state_dim]
-
-        # 提取所属队伍号信息
-        s_team = zs[..., 11]  # [n_threads, n_agents, 1]
-        o_team = ze[..., 11]  # [n_threads, n_agents, n_entity-1]
-        s_team = s_team.squeeze(-1)
-        s_team_expanded = np.broadcast_to(s_team[..., np.newaxis], o_team.shape)
-        is_equal_team = np.equal(s_team_expanded, o_team) # [n_threads, n_agents, n_entity-1]
+        # allay [n_threads, n_agents, n_entity-1-n_enemy-wall, state_dim] = [n_threads, n_agents, ally, state_dim]
 
         # 提取uid信息(排除掉自己的信息)
-        UID_binary = ze[..., :10] # [n_threads, n_agents, n_entity-1, 10]
+        UID_binary = ally[..., :10] # [n_threads, n_agents, ally, 10]
         weights = np.power(2, np.arange(10, dtype=np.float32))
-        UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, n_entity-1, 1]
-        UID = UID.squeeze(-1)   # [n_threads, n_agents, n_entity-1]
+        UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, ally, 1]
+        UID = UID.squeeze(-1)   # [n_threads, n_agents, ally]
 
         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
         s_UID_binary = s_UID_binary.squeeze(-2)
@@ -405,12 +338,15 @@ class Net(nn.Module):
         n_threads, n_agents, n_entity, _ = obs.shape
         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目
         output = np.zeros((n_threads, n_agents, n_agent), dtype=np.float32)
+
         for i in range(n_threads):
             for j in range(n_agents):
-                for m, M in enumerate(is_equal_team[i,j]):
-                    if M: # 【移除非同队伍agent】
-                        if type_mask[int(s_UID[i,j]), int(UID[i,j,m])]==1:  # 【type_mask 移除非同类型agent】
-                            output[i,j,int(UID[i,j,m])] = 0 if int(s_UID[i,j])==int(UID[i,j,m]) else 1 # 【排除自己】
+                s_id = int(s_UID[i,j])
+                for m, M in enumerate(UID[i,j]):
+                    a_id = int(UID[i,j,m])
+                    if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                        output[i,j,a_id] = 1
+
         return output
     
     def get_I_Het_mask(self, obs, type_mask, dead_mask):
@@ -426,30 +362,21 @@ class Net(nn.Module):
     
    
     def get_I_Het_mask_uhmp(self, obs, type_mask, dead_mask):
-        # type_mask [n_agent, n_agent]
-        type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask
-        # dead_mask [n_threads, n_agents, n_entity]
-        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask
-        # obs[n_threads, n_agents, n_entity, state_dim]
-        obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()
+        # uhmp部分对obs进行了切片[self=0, allay=1~int(n_entity_placeholder/2), enemy=int(n_entity_placeholder/2)~-2, wall=-1]
+        # type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask  # type_mask [n_agent, n_agent]
+        dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask  # dead_mask [n_threads, n_agents, n_entity]
+        obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()    # obs[n_threads, n_agents, n_entity, state_dim]
         assert obs.shape[-1] == self.rawob_dim, '错误的观测信息，应该为没有经过预处理的信息！'
-
-        zs, ze = self.div_entity(obs, type=[(0,), range(1, self.n_entity_placeholder)], n=self.n_entity_placeholder)
+        # 由于此处只考虑队友通信，故将enemy和wall的信息放到了不用的Other里面
+        zs, ally, other = self.div_entity(obs, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder)
         # zs [n_threads, n_agents, 1, state_dim]
-        # ze [n_threads, n_agents, n_entity-1, state_dim]
-
-        # 提取所属队伍号信息
-        s_team = zs[..., 11]  # [n_threads, n_agents, 1]
-        o_team = ze[..., 11]  # [n_threads, n_agents, n_entity-1]
-        s_team = s_team.squeeze(-1)
-        s_team_expanded = np.broadcast_to(s_team[..., np.newaxis], o_team.shape)
-        is_equal_team = np.equal(s_team_expanded, o_team) # [n_threads, n_agents, n_entity-1]
+        # allay [n_threads, n_agents, n_entity-1-n_enemy-wall, state_dim] = [n_threads, n_agents, ally, state_dim]
 
         # 提取uid信息(排除掉自己的信息)
-        UID_binary = ze[..., :10] # [n_threads, n_agents, n_entity-1, 10]
+        UID_binary = ally[..., :10] # [n_threads, n_agents, ally, 10]
         weights = np.power(2, np.arange(10, dtype=np.float32))
-        UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, n_entity-1, 1]
-        UID = UID.squeeze(-1)   # [n_threads, n_agents, n_entity-1]
+        UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, ally, 1]
+        UID = UID.squeeze(-1)   # [n_threads, n_agents, ally]
 
         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
         s_UID_binary = s_UID_binary.squeeze(-2)
@@ -458,19 +385,133 @@ class Net(nn.Module):
 
 
         # 生成最终掩码 [n_threads, n_agents, n_agent]
-        # 传递信息为[[n_threads, n_agent, n_agent]]
-
-        # UID信息(移除非同队伍agent)*type_mask
+        # UID信息(移除非同队伍agent)
         n_threads, n_agents, n_entity, _ = obs.shape
         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目
         output = np.zeros((n_threads, n_agents, n_agent), dtype=np.float32)
+
         for i in range(n_threads):
             for j in range(n_agents):
-                for m, M in enumerate(is_equal_team[i,j]):
-                    if M: # 【移除非同队伍agent】
-                        # if type_mask[int(s_UID[i,j]), int(UID[i,j,m])]==1:  # 【type_mask 移除非同类型agent】
-                        output[i,j,int(UID[i,j,m])] = 0 if int(s_UID[i,j])==int(UID[i,j,m]) else 1 # 【排除自己】
+                s_id = int(s_UID[i,j])
+                for m, M in enumerate(UID[i,j]):
+                    a_id = int(UID[i,j,m])
+                    if s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                        output[i,j,a_id] = 1
+
         return output
 
 
+# class I_GAT(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1, version=2):
+#         super(I_GAT, self).__init__()
+#         self.input_dim = input_dim
+#         self.hidden_dim = hidden_dim
+#         self.output_dim = output_dim
+#         self.n_heads = n_heads
+#         self.version = version
 
+#         assert n_heads == 1, '目前还没有涉及多头的形式!'
+#         assert version == 2, '目前只有version2的形式! version2指adv信息直接用作权重计算'
+
+#         # Version==1: 根据OA直接生成mask
+#         # Version==2: 与E_GAT共享mask, 但是weighted_sum的权重根据OA进行计算而不是Wh TODO 这里的推导明显有问题
+
+        
+#         # 不采用多头的形式
+#         self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
+#         self.a = nn.Linear(hidden_dim*2, 1, bias=False)
+#         self.act = nn.LeakyReLU(negative_slope=0.2)
+#         # self.out_attn = nn.Linear(hidden_dim, output_dim)
+
+
+#     def init_parameters(self):
+#         for param in self.parameters():
+#             stdv = 1. / math.sqrt(param.size(-1))
+#             param.data.uniform_(-stdv, stdv)
+    
+#     def forward(self, h, message, mask):
+#         if self.version == 2:
+#             return self.forward_version2(h, message, mask)
+
+#     def forward_version2(self, h, message, mask):
+#         # h        [input_dim]   
+#         # Message  [n_agent, input_dim]   
+#         # mask     [n_agent]    e.g: mask = torch.randint(0,2, (n_agent,))  
+#         # MASK  mask 只保留距离内的 + 同类的，排除掉自己
+#         n_agent = message.shape[0]
+
+#         # 自身信息
+#         h = torch.matmul(h, self.W)                #  (hidden_dim）
+#         h_repeat = repeat_at(h, 0, n_agent)         #  (n_agent, hidden_dim）
+
+#         # 接收到的观测信息（理论上应该是mask掉的，但是此处没有）
+#         H = torch.matmul(message, self.W)          # （n_agent, hidden_dim）
+        
+#         # 求权重(记得最后还得mask一遍)
+#         H_cat = torch.cat((h_repeat, H), dim=-1)   # （n_agent, hidden_dim * 2）
+#         E = self.a(H_cat)                               # （n_agent, 1）
+#         E = self.act(E)
+#         E_mask = E * mask.unsqueeze(-1) 
+#         alpha = F.softmax(E_mask, dim=0)                    # （n_agent, 1）
+#         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
+#         # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
+#         alpha_mask = torch.nan_to_num(alpha_mask, 0)
+
+#         weighted_sum = torch.mul(alpha_mask, H).sum(dim=0)  #  (hidden_dim）
+#         # H_E = self.out_attn(h + weighted_sum)
+#         H_E = F.elu(h + weighted_sum)
+
+#         return H_E
+
+
+
+
+
+# # Original Version
+# def get_E_Het_mask_uhmp(self, obs, type_mask, dead_mask):
+#         # uhmp部分对obs进行了切片
+#         # type_mask [n_agent, n_agent]
+#         type_mask = type_mask.cpu().numpy() if type_mask is not None else type_mask
+#         # dead_mask [n_threads, n_agents, n_entity]
+#         dead_mask = dead_mask.cpu().numpy() if dead_mask is not None else dead_mask
+#         # obs[n_threads, n_agents, n_entity, state_dim]
+#         obs = obs.cpu().numpy() if 'cuda' in GlobalConfig.device else obs.numpy()
+#         assert obs.shape[-1] == self.rawob_dim, '错误的观测信息，应该为没有经过预处理的信息！'
+
+#         zs, ze = self.div_entity(obs, type=[(0,), range(1, self.n_entity_placeholder)], n=self.n_entity_placeholder)
+#         # zs [n_threads, n_agents, 1, state_dim]
+#         # ze [n_threads, n_agents, n_entity-1, state_dim]
+
+#         # 提取所属队伍号信息
+#         s_team = zs[..., 11]  # [n_threads, n_agents, 1]
+#         o_team = ze[..., 11]  # [n_threads, n_agents, n_entity-1]
+#         s_team = s_team.squeeze(-1)
+#         s_team_expanded = np.broadcast_to(s_team[..., np.newaxis], o_team.shape)
+#         is_equal_team = np.equal(s_team_expanded, o_team) # [n_threads, n_agents, n_entity-1]
+
+#         # 提取uid信息(排除掉自己的信息)
+#         UID_binary = ze[..., :10] # [n_threads, n_agents, n_entity-1, 10]
+#         weights = np.power(2, np.arange(10, dtype=np.float32))
+#         UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, n_entity-1, 1]
+#         UID = UID.squeeze(-1)   # [n_threads, n_agents, n_entity-1]
+
+#         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
+#         s_UID_binary = s_UID_binary.squeeze(-2)
+#         s_UID = (s_UID_binary * weights).sum(axis=-1, keepdims=True) # [n_threads, n_agents, 1]
+#         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
+
+
+#         # 生成最终掩码 [n_threads, n_agents, n_agent]
+#         # 传递信息为[[n_threads, n_agent, n_agent]]
+
+#         # UID信息(移除非同队伍agent)*type_mask
+#         n_threads, n_agents, n_entity, _ = obs.shape
+#         n_agent = AlgorithmConfig.n_agent # 这里是全局智能体的数目，而不是batch内采样到智能体的数目
+#         output = np.zeros((n_threads, n_agents, n_agent), dtype=np.float32)
+#         for i in range(n_threads):
+#             for j in range(n_agents):
+#                 for m, M in enumerate(is_equal_team[i,j]):
+#                     if M: # 【移除非同队伍agent】
+#                         if type_mask[int(s_UID[i,j]), int(UID[i,j,m])]==1:  # 【type_mask 移除非同类型agent】
+#                             output[i,j,int(UID[i,j,m])] = 0 if int(s_UID[i,j])==int(UID[i,j,m]) else 1 # 【排除自己】
+#         return output
