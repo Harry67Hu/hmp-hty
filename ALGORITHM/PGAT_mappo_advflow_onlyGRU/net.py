@@ -31,7 +31,6 @@ class E_GAT(nn.Module):
         self.a = nn.Linear(hidden_dim*2, 1, bias=False)
         self.act = nn.LeakyReLU(negative_slope=0.2)
         self.out_attn = nn.Linear(hidden_dim, output_dim)
-        # TODO 需要判断变量的维度大小和各个参数的维度大小！！
 
 
         # 多头的遗弃版本
@@ -152,10 +151,10 @@ class Net(nn.Module):
         self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
         self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
         self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
-        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
+        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_I_dim)
         # together
-        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
-        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(adv_h_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, adv_h_dim))  # 此处默认h_dim是一致的
         
         self.AT_policy_head = nn.Sequential(
             nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
@@ -201,8 +200,8 @@ class Net(nn.Module):
         obs = torch.nan_to_num_(obs, 0)         # replace dead agents' obs, from NaN to 0  obs [n_threads, n_agents, n_entity, rawob_dim]
         assert type_mask is not None, 'type_mask wrong'
         # E_Het_mask  = torch.ones(obs.shape[0], obs.shape[1], self.n_agent)  # 不使用复杂计算的消融实验
-        E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
-        I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
+        # E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
+        # I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
 
         # Obs预处理部分
         if self.use_obs_pro_uhmp:
@@ -216,8 +215,8 @@ class Net(nn.Module):
         else:
             obs = obs.reshape(obs.shape[0], obs.shape[1], obs.shape[-2]*obs.shape[-1])  # [n_threads, n_agents, n_entity * rawob_dim]
 
-        # 环境观测理解部分
-        h_obs = self.AT_obs_encoder(obs)
+        # # 环境观测理解部分
+        # h_obs = self.AT_obs_encoder(obs)
         
         # 环境策略建议部分
         abstract_obs = self.AT_obs_abstractor(obs)
@@ -232,10 +231,10 @@ class Net(nn.Module):
         h_adv = self.fc2_rnn(self.gru_cell_memory)
 
         # PGAT部分
-        H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
-        H_I = self.AT_I_Het_GAT(h_adv, message_adv, I_Het_mask)
-        H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
-        # H_sum = self.AT_PGAT_mlp(H_E)
+        # H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
+        # H_I = self.AT_I_Het_GAT(h_adv, message_adv, I_Het_mask)
+        # H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
+        H_sum = self.AT_PGAT_mlp(h_adv)
     
         # 策略网络部分
         logits = self.AT_policy_head(H_sum)
@@ -254,7 +253,7 @@ class Net(nn.Module):
                                                             avail_act=avail_act,
                                                             eprsn=eprsn)
 
-        message_obs_output = h_obs 
+        message_obs_output = h_adv
         message_adv_output = h_adv
         # message_adv_output = h_obs
 
