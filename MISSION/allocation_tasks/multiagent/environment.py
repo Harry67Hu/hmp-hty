@@ -333,12 +333,8 @@ class MultiAgentEnv(gym.Env):
         return env_info
 
     def get_state(self):
-        assert False
+        # assert False
         return np.concatenate([self._get_obs() for agent in self.agents])
-        # entity_pos = [entity.state.p_pos for entity in self.world.landmarks]
-        # agent_pos = [other.state.p_pos for other in self.world.agents]
-        # agent_vel = [other.state.p_vel for other in self.world.agents]
-        # return np.concatenate(agent_pos+agent_vel+entity_pos)
 
     def get_avail_actions(self):
         assert False

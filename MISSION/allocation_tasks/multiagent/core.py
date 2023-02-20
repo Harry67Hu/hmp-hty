@@ -1,14 +1,5 @@
 import numpy as np
-
-class Knowledge():
-    def __init__(self):
-        '''
-            用来存储场景中的已知信息, 如每类飞机能够满足的需求
-        '''
-        self.num_requirement = 10 # 有几类需求飞机能力向量和目标需求向量的维度就是几维
-        self.plane_type = {}
-    def get_plane_capacity(self):
-        pass
+from .basic_knowledge import Knowledge
 
 # State
 class EntityState(object):
@@ -17,6 +8,7 @@ class EntityState(object):
             此处定义实体模型的基本状态
             使用样例 e.g :entity.state.p_vel = entity.state.p_vel / speed * entity.max_speed
         '''
+        self.is_alive = None
 
 class AgentState(EntityState):
     def __init__(self):
@@ -27,7 +19,7 @@ class AgentState(EntityState):
             2. 基地内各类载荷剩余数目(可能有）
         '''
 
-        self.c = None
+        self.num_plane = None # 飞机剩余数目列表，在scenario中进行初始化
 
 class TargetState(EntityState):
     def __init__(self):
@@ -38,8 +30,8 @@ class TargetState(EntityState):
             2. 目标优先级
         '''
         
-        self.example = None
-
+        self.num_requirement = None # 目标需求列表,可以在在scenario中进行初始化,也可以通过type进行加载
+        self.priority = None
 
 
 # Action 
@@ -63,6 +55,7 @@ class Entity(object):
         self.name = ''
         # properties:
         self.size = None
+        self.location = None
         
 
 class Target(Entity):
@@ -72,12 +65,13 @@ class Target(Entity):
             此处定义目标模型的基本属性
             基本状态以外的模型和参数
             1. 目标位置
-            2. 目标不确定性因素
+            2. 目标不确定性因素 TODO ?
         '''
         # state
         self.state = TargetState()
         # e.g: 
         self.color = None
+        self.type = 0 # 目标种类
 
 class Agent(Entity):
     def __init__(self, iden=None):
@@ -99,6 +93,9 @@ class Agent(Entity):
 # World Model with entity model 
 class World(object):
     def __init__(self):
+
+        self.num_requirement_type = 
+        self.num_plane_type = 
 
         self.agents = []
         self.targets = []
