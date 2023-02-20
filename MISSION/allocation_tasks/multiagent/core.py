@@ -1,5 +1,15 @@
 import numpy as np
 
+class Knowledge():
+    def __init__(self):
+        '''
+            用来存储场景中的已知信息, 如每类飞机能够满足的需求
+        '''
+        self.num_requirement = 10 # 有几类需求飞机能力向量和目标需求向量的维度就是几维
+        self.plane_type = {}
+    def get_plane_capacity(self):
+        pass
+
 # State
 class EntityState(object):
     def __init__(self):
@@ -12,7 +22,9 @@ class AgentState(EntityState):
     def __init__(self):
         super(AgentState, self).__init__()
         '''
-            此处定义基地智能体的基本状态
+            此处定义基地智能体的基本状态 (可以跟随动作变化)
+            1. 基地内各类飞机剩余数目
+            2. 基地内各类载荷剩余数目(可能有）
         '''
 
         self.c = None
@@ -21,7 +33,9 @@ class TargetState(EntityState):
     def __init__(self):
         super(TargetState, self).__init__()
         '''
-            此处定义基地智能体的基本状态
+            此处定义目标的基本状态 (可以跟随动作变化)
+            1. 目标需求
+            2. 目标优先级
         '''
         
         self.example = None
@@ -56,6 +70,9 @@ class Target(Entity):
         super(Target, self).__init__()
         '''
             此处定义目标模型的基本属性
+            基本状态以外的模型和参数
+            1. 目标位置
+            2. 目标不确定性因素
         '''
         # state
         self.state = TargetState()
@@ -67,6 +84,9 @@ class Agent(Entity):
         super(Agent, self).__init__()
         '''
             此处定义基地智能体模型的基本属性
+            基本状态以外的模型和参数
+            1. 基地位置
+            2. 
         '''
         # state
         self.state = AgentState()
@@ -102,12 +122,15 @@ class World(object):
 
     def step(self):
         '''
-            此处为环境的基本运行规则
+            此处为环境的基本运行规则   (有些部分虽然与reward相关, 但是放到规则部分, reward负责直接调用)
+            0. 环境基本状态转移模型
+            1. 载荷及飞行成本模型
+            2. 作战效益模型
         '''
         # set actions for scripted agents 
         for agent in self.scripted_agents:
             agent.action = agent.action_callback(agent, self)
-
+        # 0. 环境基本状态转移模型
         # 环境整体模型
         self.integrate_state()
         # 基地智能体状态模型
