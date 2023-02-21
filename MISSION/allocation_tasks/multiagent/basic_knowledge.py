@@ -1,5 +1,6 @@
 import numpy as np
-
+# Just have a try
+# 看看是否有效呢？
 class Knowledge():
     def __init__(self, num_requirement_type, num_plane_type):
         '''
@@ -10,7 +11,7 @@ class Knowledge():
         self.plane_type = {}
         # 存储每类飞机挂载选择的能力向量
         self.PLANE_CAPACITY = [
-            [4,4,2,0,0,0,0], # 第一类飞机挂载种类
+            [0,4,0,0,0,0,0], # 第一类飞机挂载种类
 
 
 

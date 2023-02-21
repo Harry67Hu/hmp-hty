@@ -36,13 +36,15 @@ class TargetState(EntityState):
 
 # Action 
 class Action(object):
-    def __init__(self):
+    def __init__(self, num_plane_type, max_num_plane):
         '''
             此处定义基地智能体的动作
             使用样例 e.g : state[t+1] = state[t] + agent.action.example 
+            【方案一】在这个方案里面, 每个action在一步中只对一个目标产生作用
         '''
+        self.num_plane_type = num_plane_type
+        self.max_num_plane = max_num_plane
 
-        self.example = None
 
 # Entity Model
 class Entity(object):
@@ -74,7 +76,7 @@ class Target(Entity):
         self.type = 0 # 目标种类
 
 class Agent(Entity):
-    def __init__(self, iden=None):
+    def __init__(self, iden=None, num_plane_type, max_num_plane):
         super(Agent, self).__init__()
         '''
             此处定义基地智能体模型的基本属性
@@ -85,7 +87,7 @@ class Agent(Entity):
         # state
         self.state = AgentState()
         # action
-        self.action = Action()
+        self.action = Action(num_plane_type=num_plane_type, max_num_plane=max_num_plane)
         self.action_callback = None
 
         
@@ -95,7 +97,9 @@ class World(object):
     def __init__(self):
 
         self.num_requirement_type = 
-        self.num_plane_type = 
+        self.num_plane_type =       # 飞机挂载的种类
+
+        self.max_num_plane =  # 每个机场每类飞机最大的调用数目
 
         self.agents = []
         self.targets = []
