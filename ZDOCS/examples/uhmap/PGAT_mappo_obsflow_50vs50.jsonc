@@ -1,7 +1,7 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "2nd-PGAT_mappo_obsflow-uhmap50vs50",// http://localhost:59547
+        "note": "2ndEXP-PGAT_mappo_obsflow-uhmap50vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",

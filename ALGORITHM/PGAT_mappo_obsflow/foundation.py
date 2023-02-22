@@ -111,7 +111,6 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         # C = np.equal(team_list_expand, B)
         # self.team_mask = C.astype(int)
 
-
         n_actions = len(self.shell_env.action_converter.dictionary_args)
 
         if self.ScenarioConfig.EntityOriented: 
@@ -145,6 +144,11 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         if AlgorithmConfig.ConfigOnTheFly:
             self._create_config_fly()
 
+        # Message and Action control (all threads)
+        self.OBS_MESSAGE = None
+        self.ADV_MESSAGE = None
+        self.CODE_ACTION = None
+
 
     def action_making(self, StateRecall, test_mode):
         assert ('_hook_' not in StateRecall), ('Make sure hook is cleared')
@@ -153,8 +157,7 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         
         # read obs
         obs, threads_active_flag, avail_act, eprsn = \
-            itemgetter('obs', 'threads_active_flag', 'avail_act', '_EpRsn_')(StateRecall)
-            
+            itemgetter('obs', 'threads_active_flag', 'avail_act', '_EpRsn_')(StateRecall)    
         
         # make sure obs is right
         assert obs is not None, ('Make sure obs is ok')
@@ -166,57 +169,75 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         eprsn = repeat_at(eprsn, -1, self.n_agent)
         thread_index = np.arange(self.n_thread)[threads_active_flag]
 
-        # Message and action control
-        if '_OBS_Message_' not in StateRecall or RST.all():
+        # Message and action control, 此维度与初始线程维度一致
+        if self.OBS_MESSAGE is None:
             shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.obs_h_dim]
-            message_obs = np.random.rand(*shape)
-            StateRecall['_OBS_Message_'] = message_obs
+            self.OBS_MESSAGE = np.random.rand(*shape)
+        if self.ADV_MESSAGE is None:
             shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.adv_h_dim]
-            message_adv = np.random.rand(*shape)
-            StateRecall['_ADV_Message_'] = message_adv
-        if '_action_' not in StateRecall or RST.all():
+            self.ADV_MESSAGE = np.random.rand(*shape)
+        if self.CODE_ACTION is None:
             shape = [obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim]
-            StateRecall['_action_'] = np.random.rand(*shape)
-        
+            self.CODE_ACTION = np.random.rand(*shape)
+
         target_shape = (obs.shape[0],self.type_mask.shape[0], self.type_mask.shape[1])
         type_mask_expanded = np.broadcast_to(self.type_mask[np.newaxis, :, :], target_shape)
-        # make decision
+
+        # 从上一步存储中提取当前激活线程中的信息
+        previous2now_obs_message = np.zeros([obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.obs_h_dim])
+        previous2now_adv_message = np.zeros([obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.adv_h_dim])
+        previous2now_code_action = np.zeros([obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim])
+        j = 0
+        for i, is_active in enumerate(threads_active_flag):
+            if is_active:
+                previous2now_obs_message[j] = self.OBS_MESSAGE[i]
+                previous2now_adv_message[j] = self.ADV_MESSAGE[i]
+                previous2now_code_action[j] = self.CODE_ACTION[i]
+                j += 1
+
+        # make decision 输出的维度均为[n_active_threads, n_active_agents, dim]
         with torch.no_grad():
             action, value, action_log_prob, message_obs, message_adv = self.policy.act(obs=obs,
-                                                             act=StateRecall['_action_'],
-                                                             message_obs=StateRecall['_OBS_Message_'],
-                                                             message_adv=StateRecall['_ADV_Message_'],
+                                                             act=previous2now_code_action,
+                                                             message_obs=previous2now_obs_message,
+                                                             message_adv=previous2now_adv_message,
                                                              type_mask=self.type_mask,
                                                              test_mode=test_mode,
                                                              avail_act=avail_act,
                                                              eprsn=eprsn,
                                                              )
-        # 如果是分别训练的版本，需要在此处对message信息进行整合[先拼接起来再repeat_at]
-        assert True, ('总训练的版本而非分别训练')
-        StateRecall['_OBS_Message_'] = repeat_at(message_obs, 1, obs.shape[1])
-        StateRecall['_ADV_Message_'] = repeat_at(message_adv, 1, obs.shape[1])
-
+            
         assert AlgorithmConfig.act_dim > 50, 'action_dim check'
         action_one_hot = np.eye(AlgorithmConfig.act_dim)[action.flatten()].reshape(obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim)
         StateRecall['_action_'] = action_one_hot
 
+        assert True, ('总训练的版本而非分别训练')
+        # 如果是分别训练的版本，需要在此处对message信息进行整合[先拼接起来再repeat_at]
+        # 初始message维度:[n_active_threads, n_active_agents, 64]
+
+        # 将当前激活线程中的反馈存储到全线程容器中
+        j = 0
+        for i, is_active in enumerate(threads_active_flag):
+            if is_active:
+                self.OBS_MESSAGE[i] = repeat_at(message_obs[j], 1, obs.shape[1])
+                self.ADV_MESSAGE[i] = repeat_at(message_adv[j], 1, obs.shape[1])
+                self.CODE_ACTION[i] = action_one_hot[j]
+                j += 1
+            
         # commit obs to buffer, vars named like _x_ are aligned, others are not!
- 
         traj_framefrag = {
             "_SKIP_":        ~threads_active_flag,
             "value":         value,
             "avail_act":     avail_act,
             "actionLogProb": action_log_prob,
-            "message_obs":   StateRecall['_OBS_Message_'],
-            "message_adv":   StateRecall['_ADV_Message_'],
-            "action_code":   StateRecall['_action_'],
+            "message_obs":   previous2now_obs_message,
+            "message_adv":   previous2now_adv_message,
+            "action_code":   previous2now_code_action,
             "type_mask":     type_mask_expanded,
             "obs":           obs, 
-
             "action":        action,
         }
         if avail_act is not None: traj_framefrag.update({'avail_act':  avail_act})
-
 
         # deal with rollout later when the reward is ready, leave a hook as a callback here
         if not test_mode: StateRecall['_hook_'] = self.commit_traj_frag(traj_framefrag, req_hook = True)

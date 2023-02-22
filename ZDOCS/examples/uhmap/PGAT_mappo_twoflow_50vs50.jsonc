@@ -1,18 +1,18 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "1stEXP-PGAT_mappo_twoflow-uhmap50vs50",// http://localhost:59547
+        "note": "2ndEXP-PGAT_mappo_twoflow-uhmap50vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
         "draw_mode": "Img",
-        "num_threads": 16,  // 请预留 num_threads * 1 GB 的内存空间
+        "num_threads": 32,  // 请预留 num_threads * 1 GB 的内存空间
         "report_reward_interval": 128,
         "test_interval": 1280,
         "test_epoch": 512,
         "interested_team": 0,
         "seed": 10098,
-        "device": "cuda:5",
+        "device": "cuda",
         "max_n_episode": 5000000,
         "fold": 1,
         "backup_files": [

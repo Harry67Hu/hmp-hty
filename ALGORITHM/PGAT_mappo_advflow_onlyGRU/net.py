@@ -14,7 +14,6 @@ from ALGORITHM.common.norm import DynamicNormFix
 from ALGORITHM.common.net_manifest import weights_init
 from config import GlobalConfig
 
-
 class E_GAT(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1):
         super(E_GAT, self).__init__()
@@ -25,28 +24,20 @@ class E_GAT(nn.Module):
 
         assert n_heads == 1, '目前还没有涉及多头的形式！'
 
-        
         # 不采用多头的形式
-        self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
-        self.a = nn.Linear(hidden_dim*2, 1, bias=False)
+        self.W = nn.Parameter(torch.Tensor(input_dim, output_dim))
+        self.a = nn.Parameter(torch.Tensor(output_dim*2, 1))
         self.act = nn.LeakyReLU(negative_slope=0.2)
-        self.out_attn = nn.Linear(hidden_dim, output_dim)
-
-
-        # 多头的遗弃版本
-        # self.W = nn.Parameter(torch.Tensor(n_heads, input_dim, hidden_dim))
-        # self.a = nn.Parameter(torch.Tensor(n_heads, hidden_dim * 2))
-        # self.attn_head = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(n_heads)])
-        # self.out_attn = nn.Linear(n_heads * hidden_dim, output_dim)
 
         self.init_parameters()
 
 
     def init_parameters(self):
-        param = self.W
+        params = [self.W, self.a]
         # for param in self.parameters():
-        stdv = 1. / math.sqrt(param.size(-1))
-        param.data.uniform_(-stdv, stdv)
+        for param in params:
+            stdv = 1. / math.sqrt(param.size(-1))
+            param.data.uniform_(-stdv, stdv)
     
     def forward(self, h, message, mask):
         # h维度为[input_dim]   
@@ -58,6 +49,7 @@ class E_GAT(nn.Module):
 
         # n_agent = message.shape[0]
         n_agent = AlgorithmConfig.n_agent
+        assert n_agent == message.shape[-2]
 
         # 自身信息
         h = torch.matmul(h, self.W)               #  (hidden_dim）
@@ -66,23 +58,27 @@ class E_GAT(nn.Module):
         # 接收到的观测信息（理论上应该是mask掉的，但是此处没有）
         H = torch.matmul(message, self.W)          # （n_agent, hidden_dim）
         
-        # 求权重(记得最后还得mask一遍)
+        # 求权重
         H_cat = torch.cat((h_repeat, H), dim=-1)   # （n_agent, hidden_dim * 2）
-        E = self.a(H_cat)                               # （n_agent, 1）
-        E = self.act(E)
-        E_mask = E * mask.unsqueeze(-1) 
-        alpha = F.softmax(E_mask, dim=-2)                    # （n_agent, 1）
-        alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
-        # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
-        alpha_mask = torch.nan_to_num(alpha_mask, 0)
+        E = torch.matmul(H_cat, self.a)                             # （n_agent, 1）
+        E = self.act(E).squeeze(-1)
+        zero_vec = -9e15 * torch.ones_like(E)
 
-        weighted_sum = torch.mul(alpha_mask, H).sum(dim=-2)  #  (hidden_dim）
-        H_E = self.out_attn(h + weighted_sum)
-        H_E = F.elu(H_E)
+        is_all_zero_mask = torch.logical_not(torch.all(mask == 0, dim=-1)).to(torch.int)   #  处理一个智能体mask全为0的情况
+
+        attention = torch.where(mask>0, E, zero_vec)        
+        attention_alpha = F.softmax(attention, dim=-1)
+        assert not torch.isnan(attention_alpha).any(), ('nan problem!')
+
+        weighted_sum = torch.mul(attention_alpha.unsqueeze(-1), H).sum(dim=-2)  #  (hidden_dim）
+        weighted_sum = torch.mul(is_all_zero_mask.unsqueeze(-1), weighted_sum)  #  处理一个智能体mask全为0的情况
+
+        # # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
+        # attention_alpha = torch.nan_to_num(attention_alpha, 0)
+        H_E = F.elu(h + weighted_sum)
         assert not torch.isnan(H_E).any(), ('nan problem!')
 
         return H_E
-
 
 
 
@@ -188,7 +184,7 @@ class Net(nn.Module):
         eval_act = eval_actions if eval_mode else None
         others = {}
         assert self.n_entity_placeholder == obs.shape[-2], 'observation structure wrong!'
-
+        a = act
         # 数据处理
         if self.use_normalization:
             if torch.isnan(obs).all():
