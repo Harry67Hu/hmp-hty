@@ -115,7 +115,7 @@ class Net(nn.Module):
         GAT_h_dim = AlgorithmConfig.GAT_h_dim
         H_E_dim = AlgorithmConfig.H_E_dim
         H_I_dim = AlgorithmConfig.H_I_dim
-        h_dim = AlgorithmConfig.obs_h_dim   # TODO 
+        h_dim = AlgorithmConfig.h_dim   
 
         
 
@@ -123,27 +123,23 @@ class Net(nn.Module):
         if self.use_normalization:
             self._batch_norm = DynamicNormFix(rawob_dim, only_for_last_dim=True, exclude_one_hot=True, exclude_nan=True)
 
-        # observation pre-process (if needed)
-        if self.use_obs_pro_uhmp:
-            self.state_encoder = nn.Sequential(nn.Linear(rawob_dim, obs_process_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_process_h_dim, obs_process_h_dim))
-            self.entity_encoder = nn.Sequential(nn.Linear(rawob_dim * (self.n_entity_placeholder-1), obs_process_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_process_h_dim, obs_process_h_dim))
-    
-            self.AT_obs_encoder = nn.Sequential(nn.Linear(obs_process_h_dim + obs_process_h_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
-            self.AT_obs_abstractor = nn.Sequential(nn.Linear(obs_process_h_dim + obs_process_h_dim, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
-            self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
+        # actor-critic share
+        self.AT_obs_encoder = nn.Sequential(nn.Linear(h_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, h_dim))
+        self.attention_layer = SimpleAttention(h_dim=h_dim)
 
-        else: 
-            self.AT_obs_encoder = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
-            self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
-            self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
+
+
+        
 
         # actor network construction ***
         # 1st flow
-            # self.AT_obs_encoder
+        _size = self.n_entity_placeholder * h_dim
+        self.AT_obs_message = nn.Sequential(nn.Linear(_size, obs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_h_dim, obs_h_dim))
         self.AT_E_Het_GAT = E_GAT(input_dim=obs_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
         # 2nd flow
-            # self.AT_obs_abstractor
-            # self.AT_act_abstractor
+        
+        self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
+        self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
         self.gru_cell_memory = None
         self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
         self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
@@ -200,23 +196,13 @@ class Net(nn.Module):
         E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
         I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
 
-        # Obs预处理部分
-        if self.use_obs_pro_uhmp:
-            s, other = self.div_entity(obs,       type=[(0,), range(1, self.n_entity_placeholder)], n=self.n_entity_placeholder)
-            s = s.squeeze(-2)                                               # [n_threads, n_agents, rawob_dim]
-            other = other.reshape(other[0], other[1], other[-2]*other[-1])  # [n_threads, n_agents, n_entity-1 * rawob_dim]
-            print(other.size)
-            zs = self.state_encoder(s)          # [n_threads, n_agents, obs_process_h_dim]
-            zo = self.entity_encoder(other)     # [n_threads, n_agents, obs_process_h_dim]
-            obs = torch.cat((zs, zo), -1)     # [n_threads, n_agents, obs_process_h_dim * 2]
-        else:
-            obs = obs.reshape(obs.shape[0], obs.shape[1], obs.shape[-2]*obs.shape[-1])  # [n_threads, n_agents, n_entity * rawob_dim]
-        
-
         # actor-critic share
-        
+        obs_emb = self.AT_obs_encoder(obs)
+        obs_emb = self.attention_layer(k=obs_emb,q=obs_emb,k=obs_emb, mask=mask_dead)
 
         # 环境观测理解部分
+        h_obs = my_view(obs_emb,[0,0,-1])
+
         h_obs = self.AT_obs_encoder(obs)
         
         # 环境策略建议部分

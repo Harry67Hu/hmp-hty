@@ -1,12 +1,12 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "1stEXP-ppoma-uhmap50vs50",// http://localhost:59547
+        "note": "test-ppoma-uhmap50vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
         "draw_mode": "Img",
-        "num_threads": 64,  // 请预留 num_threads * 1 GB 的内存空间
+        "num_threads": 2,  // 请预留 num_threads * 1 GB 的内存空间
         "report_reward_interval": 128,
         "test_interval": 1280,
         "test_epoch": 512,
@@ -25,8 +25,8 @@
     // --- Part2: config MISSION --- 
     "MISSION.uhmap.uhmap_env_wrapper.py->ScenarioConfig": {
         "N_AGENT_EACH_TEAM": [50, 50], // update N_AGENT_EACH_TEAM
-        "MAX_NUM_OPP_OBS": 10,
-        "MAX_NUM_ALL_OBS" :10,
+        "MAX_NUM_OPP_OBS": 5,
+        "MAX_NUM_ALL_OBS" :5,
         "MaxEpisodeStep": 150,
         "StepGameTime": 0.5,
         "StateProvided": false,
@@ -164,7 +164,7 @@
         "add_avail_act": true
     },
     "ALGORITHM.ppo_ma.foundation.py->AlgorithmConfig": {
-        "train_traj_needed": 64,
+        "train_traj_needed": 2,
         "use_normalization": true,
         "load_specific_checkpoint": "",
         "gamma": 0.99,
