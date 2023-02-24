@@ -412,7 +412,8 @@ class Net(nn.Module):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
                     a_id = int(UID[i,j,m])
-                    if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                    # if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                    if s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
                         output[i,j,a_id] = 1
 
         return output

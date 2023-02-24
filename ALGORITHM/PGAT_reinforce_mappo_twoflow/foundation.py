@@ -31,14 +31,14 @@ class AlgorithmConfig:
     act_dim = 64
     rnn_h_dim = 64
     obs_abs_h_dim = 128
-    act_abs_h_dim = 128
+    act_abs_h_dim = 64
 
     # PGAT Net part
-    obs_h_dim = 32
-    adv_h_dim = 32
+    obs_h_dim = 64
+    adv_h_dim = 64
     GAT_h_dim = 32
-    H_E_dim = 32
-    H_I_dim = 32
+    H_E_dim = 64
+    H_I_dim = 64
 
     # PPO part
     clip_param = 0.2

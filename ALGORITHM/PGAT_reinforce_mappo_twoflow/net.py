@@ -124,12 +124,10 @@ class Net(nn.Module):
             self._batch_norm = DynamicNormFix(rawob_dim, only_for_last_dim=True, exclude_one_hot=True, exclude_nan=True)
 
         # actor-critic share
-        self.AT_obs_encoder = nn.Sequential(nn.Linear(h_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, h_dim))
+        self.AT_obs_encoder = nn.Sequential(nn.Linear(rawob_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, h_dim))
         self.attention_layer = SimpleAttention(h_dim=h_dim)
 
 
-
-        
 
         # actor network construction ***
         # 1st flow
@@ -137,8 +135,7 @@ class Net(nn.Module):
         self.AT_obs_message = nn.Sequential(nn.Linear(_size, obs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_h_dim, obs_h_dim))
         self.AT_E_Het_GAT = E_GAT(input_dim=obs_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
         # 2nd flow
-        
-        self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
+        self.AT_obs_abstractor = nn.Sequential(nn.Linear(_size, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
         self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
         self.gru_cell_memory = None
         self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
@@ -146,13 +143,12 @@ class Net(nn.Module):
         self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
         self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
         # together
-        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
-        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, obs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_h_dim, obs_h_dim))  
         
         self.AT_policy_head = nn.Sequential(
-            nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
-            nn.Linear(h_dim, h_dim//2), nn.ReLU(inplace=True),
-            nn.Linear(h_dim//2, self.n_action))
+            nn.Linear(obs_h_dim, obs_h_dim), nn.ReLU(inplace=True),
+            nn.Linear(obs_h_dim, obs_h_dim//2), nn.ReLU(inplace=True),
+            nn.Linear(obs_h_dim//2, self.n_action))
 
         # critic network construction ***
         self.CT_get_value = nn.Sequential(nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
@@ -198,15 +194,14 @@ class Net(nn.Module):
 
         # actor-critic share
         obs_emb = self.AT_obs_encoder(obs)
-        obs_emb = self.attention_layer(k=obs_emb,q=obs_emb,k=obs_emb, mask=mask_dead)
+        obs_emb = self.attention_layer(k=obs_emb,q=obs_emb,v=obs_emb, mask=mask_dead)  # [n_threads, n_agents, n_entity, h_dim]
 
         # 环境观测理解部分
-        h_obs = my_view(obs_emb,[0,0,-1])
-
-        h_obs = self.AT_obs_encoder(obs)
+        h_obs_init = my_view(obs_emb,[0,0,-1])
+        h_obs = self.AT_obs_message(h_obs_init)
         
         # 环境策略建议部分
-        abstract_obs = self.AT_obs_abstractor(obs)
+        abstract_obs = self.AT_obs_abstractor(h_obs_init)
         abstract_act = self.AT_act_abstractor(act)
         abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
         gru_input = F.relu(self.fc1_rnn(abstract_cat))
