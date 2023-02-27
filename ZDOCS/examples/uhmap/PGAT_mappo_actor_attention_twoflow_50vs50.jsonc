@@ -1,7 +1,7 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "4thEXP-PGAT_mappo_obsflow-uhmap50vs50",// http://localhost:59547
+        "note": "4thEXP-PGAT_mappo_actor_attention_twoflow-uhmap50vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
@@ -11,12 +11,12 @@
         "test_interval": 1280,
         "test_epoch": 512,
         "interested_team": 0,
-        "seed": 13672,
+        "seed": 10098,
         "device": "cuda",
         "max_n_episode": 5000000,
         "fold": 1,
         "backup_files": [
-            "ALGORITHM/PGAT_mappo_obsflow",
+            "ALGORITHM/PGAT_mappo_actor_attention_twoflow",
             "MISSION/uhmap"
         ]
     },
@@ -25,8 +25,8 @@
     // --- Part2: config MISSION --- 
     "MISSION.uhmap.uhmap_env_wrapper.py->ScenarioConfig": {
         "N_AGENT_EACH_TEAM": [50, 50], // update N_AGENT_EACH_TEAM
-        "MAX_NUM_OPP_OBS": 5,
-        "MAX_NUM_ALL_OBS" :5,
+        "MAX_NUM_OPP_OBS": 10,
+        "MAX_NUM_ALL_OBS" :10,
         "MaxEpisodeStep": 150,
         "StepGameTime": 0.5,
         "StateProvided": false,
@@ -40,7 +40,7 @@
         "UhmapServerExe": "/home/hmp/UnrealHmapBinary/Version3.5/LinuxServer/UHMPServer.sh",
         "TimeDilation": 64, // simulation time speed up, larger is faster
         "TEAM_NAMES": [
-            "ALGORITHM.PGAT_mappo_obsflow.foundation->ReinforceAlgorithmFoundation",
+            "ALGORITHM.PGAT_mappo_actor_attention_twoflow.foundation->ReinforceAlgorithmFoundation",
             "ALGORITHM.script_ai.uhmap_ls->DummyAlgorithmLinedAttack",
         ]
     },
@@ -162,11 +162,11 @@
     },
 
     // --- Part3: config ALGORITHM 2/2 --- 
-    "ALGORITHM.PGAT_mappo_obsflow.shell_env.py->ShellEnvConfig": {
+    "ALGORITHM.PGAT_mappo_actor_attention_twoflow.shell_env.py->ShellEnvConfig": {
         "add_avail_act": true
     },
-    "ALGORITHM.PGAT_mappo_obsflow.foundation.py->AlgorithmConfig": {
-        "train_traj_needed": 32,
+    "ALGORITHM.PGAT_mappo_actor_attention_twoflow.foundation.py->AlgorithmConfig": {
+        "train_traj_needed": 16,
         "use_normalization": true,
         "use_obs_pro_uhmp": false,
         "load_specific_checkpoint": "",
@@ -178,10 +178,10 @@
         "ppo_epoch": 24,
         "policy_resonance": false,
         "debug": true,
-        "n_entity_placeholder": 11,
+        "n_entity_placeholder": 21,
     },
 
-    "ALGORITHM.PGAT_mappo_obsflow.stage_planner.py->PolicyRsnConfig": {
+    "ALGORITHM.PGAT_mappo_actor_attention_twoflow.stage_planner.py->PolicyRsnConfig": {
         "resonance_start_at_update": 1,
         "yita_min_prob": 0.05,
         "yita_max": 0.5,

@@ -14,7 +14,6 @@ from ALGORITHM.common.norm import DynamicNormFix
 from ALGORITHM.common.net_manifest import weights_init
 from config import GlobalConfig
 
-
 class E_GAT(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1):
         super(E_GAT, self).__init__()
@@ -82,6 +81,8 @@ class E_GAT(nn.Module):
         return H_E
 
 
+
+
 class Net(nn.Module):
     def __init__(self, rawob_dim, n_action, **kwargs):
         super().__init__()
@@ -116,6 +117,8 @@ class Net(nn.Module):
         H_I_dim = AlgorithmConfig.H_I_dim
         h_dim = AlgorithmConfig.obs_h_dim   # TODO 
 
+        # TEMP part
+        h_obs_init_dim = 24
         
 
         # observation normalization
@@ -132,10 +135,13 @@ class Net(nn.Module):
             self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
 
         else: 
-            self.AT_obs_encoder = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
-            self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
+            self.AT_obs_encoder = nn.Sequential(nn.Linear(h_obs_init_dim  * self.n_entity_placeholder, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
+            self.AT_obs_abstractor = nn.Sequential(nn.Linear(h_obs_init_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
             self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
 
+        self.share_obs_encoder = nn.Sequential(nn.Linear(rawob_dim, h_obs_init_dim), nn.ReLU(inplace=True), nn.Linear(h_obs_init_dim, h_obs_init_dim)) 
+        self.share_attention_layer = SimpleAttention(h_dim=h_obs_init_dim)
+        self.CT_encoder = nn.Sequential(nn.Linear(h_obs_init_dim  * self.n_entity_placeholder, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
         # actor network construction ***
         # 1st flow
             # self.AT_obs_encoder
@@ -147,10 +153,10 @@ class Net(nn.Module):
         self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
         self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
         self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
-        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_I_dim)
+        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
         # together
-        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
-        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, adv_h_dim))  # 此处默认h_dim是一致的
+        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
         
         self.AT_policy_head = nn.Sequential(
             nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
@@ -158,6 +164,7 @@ class Net(nn.Module):
             nn.Linear(h_dim//2, self.n_action))
 
         # critic network construction ***
+        self.CT_attention_layer = SimpleAttention(h_dim=obs_h_dim)
         self.CT_get_value = nn.Sequential(nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
         # self.CT_get_threat = nn.Sequential(nn.Linear(tmp_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
 
@@ -196,26 +203,18 @@ class Net(nn.Module):
         obs = torch.nan_to_num_(obs, 0)         # replace dead agents' obs, from NaN to 0  obs [n_threads, n_agents, n_entity, rawob_dim]
         assert type_mask is not None, 'type_mask wrong'
         # E_Het_mask  = torch.ones(obs.shape[0], obs.shape[1], self.n_agent)  # 不使用复杂计算的消融实验
-        # E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
+        E_Het_mask = self.get_E_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)     # [n_threads, n_agents, n_agent] # warning n_agents是共享网络的智能体数据，n_agent是全局智能体数目
         I_Het_mask = self.get_I_Het_mask(obs=obs, type_mask=type_mask, dead_mask=mask_dead)
 
-        # Obs预处理部分
-        if self.use_obs_pro_uhmp:
-            s, other = self.div_entity(obs,       type=[(0,), range(1, self.n_entity_placeholder)], n=self.n_entity_placeholder)
-            s = s.squeeze(-2)                                               # [n_threads, n_agents, rawob_dim]
-            other = other.reshape(other[0], other[1], other[-2]*other[-1])  # [n_threads, n_agents, n_entity-1 * rawob_dim]
-            print(other.size)
-            zs = self.state_encoder(s)          # [n_threads, n_agents, obs_process_h_dim]
-            zo = self.entity_encoder(other)     # [n_threads, n_agents, obs_process_h_dim]
-            obs = torch.cat((zs, zo), -1)     # [n_threads, n_agents, obs_process_h_dim * 2]
-        else:
-            obs = obs.reshape(obs.shape[0], obs.shape[1], obs.shape[-2]*obs.shape[-1])  # [n_threads, n_agents, n_entity * rawob_dim]
+        # actor-critic share
+        obs_share = self.share_obs_encoder(obs)
+        obs_share = self.share_attention_layer(k=obs_share,q=obs_share,v=obs_share,mask=mask_dead)
 
-        # # 环境观测理解部分
-        # h_obs = self.AT_obs_encoder(obs)
+        # 环境观测理解部分
+        h_obs = self.AT_obs_encoder(my_view(obs_share,[0,0,-1]))
         
         # 环境策略建议部分
-        abstract_obs = self.AT_obs_abstractor(obs)
+        abstract_obs = self.AT_obs_abstractor(my_view(obs_share,[0,0,-1]))
         abstract_act = self.AT_act_abstractor(act)
         abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
         gru_input = F.relu(self.fc1_rnn(abstract_cat))
@@ -227,17 +226,18 @@ class Net(nn.Module):
         h_adv = self.fc2_rnn(self.gru_cell_memory)
 
         # PGAT部分
-        # H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
+        H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
         H_I = self.AT_I_Het_GAT(h_adv, message_adv, I_Het_mask)
-        # H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
-        H_sum = self.AT_PGAT_mlp(H_I)
+        H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
+        # H_sum = self.AT_PGAT_mlp(H_E)
     
         # 策略网络部分
         logits = self.AT_policy_head(H_sum)
 
         # Critic网络部分
-        value = self.CT_get_value(H_sum)
-            
+        ct_input = self.CT_encoder(my_view(obs_share,[0,0,-1]))
+        ct_input = self.CT_attention_layer(k=ct_input,q=ct_input,v=ct_input)
+        value = self.CT_get_value(ct_input)
             
         logit2act = self._logit2act
         if self.use_policy_resonance and self.is_resonance_active():
@@ -249,9 +249,8 @@ class Net(nn.Module):
                                                             avail_act=avail_act,
                                                             eprsn=eprsn)
 
-        message_obs_output = h_adv
+        message_obs_output = h_obs 
         message_adv_output = h_adv
-        # message_adv_output = h_obs
 
 
         if not eval_mode: return act, value, actLogProbs, message_obs_output, message_adv_output
@@ -320,12 +319,13 @@ class Net(nn.Module):
         weights = np.power(2, np.arange(10, dtype=np.float32))
         UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, ally, 1]
         UID = UID.squeeze(-1)   # [n_threads, n_agents, ally]
-
         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
         s_UID_binary = s_UID_binary.squeeze(-2)
         s_UID = (s_UID_binary * weights).sum(axis=-1, keepdims=True) # [n_threads, n_agents, 1]
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
-
+ 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
 
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # 传递信息为[[n_threads, n_agent, n_agent]]
@@ -339,9 +339,10 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
     
@@ -380,6 +381,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
+
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # UID信息(移除非同队伍agent)
         n_threads, n_agents, n_entity, _ = obs.shape
@@ -390,9 +394,10 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    if s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if s_id != a_id:  # 【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
 

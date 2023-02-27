@@ -263,7 +263,8 @@ class Net(nn.Module):
         # motivation objectives
         value = self.CT_get_value(v_M_fuse)
         threat = self.CT_get_threat(v_M_fuse)
-
+          
+    
 
 
         act, actLogProbs, distEntropy, probs = self.logit2act(logits, eval_mode=eval_mode, 

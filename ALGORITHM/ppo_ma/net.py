@@ -102,7 +102,7 @@ class Net(nn.Module):
         # # # # # # # # # # critic # # # # # # # # # # # #
         ct_bac = my_view(baec,[0,0,-1])
         ct_bac = self.ct_encoder(ct_bac)
-        # ct_bac = self.ct_attention_layer(k=ct_bac,q=ct_bac,v=ct_bac)
+        ct_bac = self.ct_attention_layer(k=ct_bac,q=ct_bac,v=ct_bac)
         value = self.get_value(ct_bac)
         
         if not eval_mode: return act, value, actLogProbs

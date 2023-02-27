@@ -159,6 +159,7 @@ class Net(nn.Module):
             nn.Linear(h_dim//2, self.n_action))
 
         # critic network construction ***
+        self.CT_attention_layer = SimpleAttention(h_dim=obs_h_dim)
         self.CT_get_value = nn.Sequential(nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
         # self.CT_get_threat = nn.Sequential(nn.Linear(tmp_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
 
@@ -241,7 +242,8 @@ class Net(nn.Module):
         logits = self.AT_policy_head(H_sum)
 
         # Critic网络部分
-        value = self.CT_get_value(H_sum)
+        ct_input = self.CT_attention_layer(k=H_sum,q=H_sum,v=H_sum)
+        value = self.CT_get_value(ct_input)
             
             
         logit2act = self._logit2act
@@ -325,12 +327,13 @@ class Net(nn.Module):
         weights = np.power(2, np.arange(10, dtype=np.float32))
         UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, ally, 1]
         UID = UID.squeeze(-1)   # [n_threads, n_agents, ally]
-
         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
         s_UID_binary = s_UID_binary.squeeze(-2)
         s_UID = (s_UID_binary * weights).sum(axis=-1, keepdims=True) # [n_threads, n_agents, 1]
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
-
+ 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
 
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # 传递信息为[[n_threads, n_agent, n_agent]]
@@ -344,9 +347,10 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
     
@@ -385,6 +389,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
+
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # UID信息(移除非同队伍agent)
         n_threads, n_agents, n_entity, _ = obs.shape
@@ -395,9 +402,10 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    if s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if s_id != a_id:  # 【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
 

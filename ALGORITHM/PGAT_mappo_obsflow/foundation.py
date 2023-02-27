@@ -29,8 +29,8 @@ class AlgorithmConfig:
     # obs-act abstract net part
     act_dim = 64
     rnn_h_dim = 64
-    obs_abs_h_dim = 128
-    act_abs_h_dim = 128
+    obs_abs_h_dim = 64
+    act_abs_h_dim = 64
 
     # PGAT Net part
     obs_h_dim = 32

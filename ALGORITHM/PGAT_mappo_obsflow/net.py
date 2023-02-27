@@ -14,78 +14,6 @@ from ALGORITHM.common.norm import DynamicNormFix
 from ALGORITHM.common.net_manifest import weights_init
 from config import GlobalConfig
 
-
-# class E_GAT(nn.Module):
-#     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1):
-#         super(E_GAT, self).__init__()
-#         self.input_dim = input_dim
-#         self.hidden_dim = hidden_dim
-#         self.output_dim = output_dim
-#         self.n_heads = n_heads
-
-#         assert n_heads == 1, '目前还没有涉及多头的形式！'
-
-        
-#         # 不采用多头的形式
-#         self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
-#         self.a = nn.Linear(hidden_dim*2, 1, bias=False)
-#         self.act = nn.LeakyReLU(negative_slope=0.2)
-
-#         self.out_attn = nn.Linear(hidden_dim, output_dim)
-
-
-#         # 多头的遗弃版本
-#         # self.W = nn.Parameter(torch.Tensor(n_heads, input_dim, hidden_dim))
-#         # self.a = nn.Parameter(torch.Tensor(n_heads, hidden_dim * 2))
-#         # self.attn_head = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(n_heads)])
-#         # self.out_attn = nn.Linear(n_heads * hidden_dim, output_dim)
-
-#         self.init_parameters()
-
-
-#     def init_parameters(self):
-#         param = self.W
-#         # for param in self.parameters():
-#         stdv = 1. / math.sqrt(param.size(-1))
-#         param.data.uniform_(-stdv, stdv)
-    
-#     def forward(self, h, message, mask):
-#         # h维度为[input_dim]   
-#         # message维度为[n_agent, input_dim]   
-#         # mask维度为[n_agent]    e.g: mask = torch.randint(0,2, (n_agent,))  
-#         # MASK  mask 只保留距离内的 + 同类的，排除掉自己
-#         mask = torch.tensor(mask).to(GlobalConfig.device)
-#         # OBS [n_entity, input_dim] 用作知识直接提取信息
-
-#         # n_agent = message.shape[0]
-#         n_agent = AlgorithmConfig.n_agent
-
-#         # 自身信息
-#         h = torch.matmul(h, self.W)               #  (hidden_dim）
-#         h_repeat = repeat_at(h, -2, n_agent)        #  (n_agent, hidden_dim）
-
-#         # 接收到的观测信息（理论上应该是mask掉的，但是此处没有）
-#         H = torch.matmul(message, self.W)          # （n_agent, hidden_dim）
-        
-#         # 求权重(记得最后还得mask一遍)
-#         H_cat = torch.cat((h_repeat, H), dim=-1)   # （n_agent, hidden_dim * 2）
-#         E = self.a(H_cat)                               # （n_agent, 1）
-#         E = self.act(E)
-#         E_mask = E * mask.unsqueeze(-1) 
-#         alpha = F.softmax(E_mask, dim=-2)                    # （n_agent, 1）
-#         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
-#         # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
-#         alpha_mask = torch.nan_to_num(alpha_mask, 0)
-
-#         weighted_sum = torch.mul(alpha_mask, H).sum(dim=-2)  #  (hidden_dim）
-#         H_E = self.out_attn(h + weighted_sum)
-#         H_E = F.elu(H_E)
-#         assert not torch.isnan(H_E).any(), ('nan problem!')
-
-#         return H_E
-
-
-
 class E_GAT(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1):
         super(E_GAT, self).__init__()
@@ -154,6 +82,7 @@ class E_GAT(nn.Module):
 
 
 
+
 class Net(nn.Module):
     def __init__(self, rawob_dim, n_action, **kwargs):
         super().__init__()
@@ -215,14 +144,14 @@ class Net(nn.Module):
         # 2nd flow
             # self.AT_obs_abstractor
             # self.AT_act_abstractor
-        self.gru_cell_memory = None
-        self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
-        self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
-        self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
-        self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
+        # self.gru_cell_memory = None
+        # self.fc1_rnn = nn.Linear(obs_abs_h_dim + act_abs_h_dim, rnn_h_dim)
+        # self.gru = nn.GRUCell(rnn_h_dim, rnn_h_dim)
+        # self.fc2_rnn = nn.Linear(rnn_h_dim, adv_h_dim)
+        # self.AT_I_Het_GAT = E_GAT(input_dim=adv_h_dim, hidden_dim=GAT_h_dim, output_dim=H_E_dim)
         # together
         # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim + H_I_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
-        self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
+        # self.AT_PGAT_mlp = nn.Sequential(nn.Linear(H_E_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))  # 此处默认h_dim是一致的
         
         self.AT_policy_head = nn.Sequential(
             nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),
@@ -230,6 +159,7 @@ class Net(nn.Module):
             nn.Linear(h_dim//2, self.n_action))
 
         # critic network construction ***
+        self.CT_attention_layer = SimpleAttention(h_dim=obs_h_dim)
         self.CT_get_value = nn.Sequential(nn.Linear(obs_h_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
         # self.CT_get_threat = nn.Sequential(nn.Linear(tmp_dim, h_dim), nn.ReLU(inplace=True),nn.Linear(h_dim, 1))
 
@@ -282,11 +212,15 @@ class Net(nn.Module):
             obs = torch.cat((zs, zo), -1)     # [n_threads, n_agents, obs_process_h_dim * 2]
         else:
             obs = obs.reshape(obs.shape[0], obs.shape[1], obs.shape[-2]*obs.shape[-1])  # [n_threads, n_agents, n_entity * rawob_dim]
+        
+
+        # actor-critic share
+        
 
         # 环境观测理解部分
         h_obs = self.AT_obs_encoder(obs)
         
-        # 环境策略建议部分
+        # # 环境策略建议部分
         # abstract_obs = self.AT_obs_abstractor(obs)
         # abstract_act = self.AT_act_abstractor(act)
         # abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
@@ -302,13 +236,14 @@ class Net(nn.Module):
         H_E = self.AT_E_Het_GAT(h_obs, message_obs, E_Het_mask)
         # H_I = self.AT_I_Het_GAT(h_adv, message_adv, I_Het_mask)
         # H_sum = self.AT_PGAT_mlp(torch.cat((H_E, H_I), -1))
-        H_sum = self.AT_PGAT_mlp(H_E)
+        # H_sum = self.AT_PGAT_mlp(H_E)
     
         # 策略网络部分
-        logits = self.AT_policy_head(H_sum)
+        logits = self.AT_policy_head(H_E)
 
         # Critic网络部分
-        value = self.CT_get_value(H_sum)
+        ct_input = self.CT_attention_layer(k=H_E,q=H_E,v=H_E)
+        value = self.CT_get_value(ct_input)
             
             
         logit2act = self._logit2act
@@ -392,12 +327,13 @@ class Net(nn.Module):
         weights = np.power(2, np.arange(10, dtype=np.float32))
         UID = (UID_binary * weights).sum(axis=-1, keepdims=True)    # [n_threads, n_agents, ally, 1]
         UID = UID.squeeze(-1)   # [n_threads, n_agents, ally]
-
         s_UID_binary = zs[..., :10] # [n_threads, n_agents, 1, 10]
         s_UID_binary = s_UID_binary.squeeze(-2)
         s_UID = (s_UID_binary * weights).sum(axis=-1, keepdims=True) # [n_threads, n_agents, 1]
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
-
+ 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
 
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # 传递信息为[[n_threads, n_agent, n_agent]]
@@ -411,10 +347,10 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    # if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                    if s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if type_mask[s_id, a_id]==1 and s_id != a_id:  # 【type_mask 移除非同类型agent】【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
     
@@ -453,6 +389,9 @@ class Net(nn.Module):
         s_UID = s_UID.squeeze(-1)   # [n_threads, n_agents]
 
 
+        # 对应构造dead_mask    [n_threads, n_agents, ally]
+        _, dead_mask_ally, _ = self.div_entity(dead_mask, type=[(0,), range(1, int(self.n_entity_placeholder/2)), range(int(self.n_entity_placeholder/2), self.n_entity_placeholder)], n=self.n_entity_placeholder) 
+
         # 生成最终掩码 [n_threads, n_agents, n_agent]
         # UID信息(移除非同队伍agent)
         n_threads, n_agents, n_entity, _ = obs.shape
@@ -463,13 +402,75 @@ class Net(nn.Module):
             for j in range(n_agents):
                 s_id = int(s_UID[i,j])
                 for m, M in enumerate(UID[i,j]):
-                    a_id = int(UID[i,j,m])
-                    if s_id != a_id:  # 【排除自己】
-                        output[i,j,a_id] = 1
+                    if not dead_mask_ally[i,j,m]:
+                        a_id = int(UID[i,j,m])
+                        if s_id != a_id:  # 【排除自己】
+                            output[i,j,a_id] = 1
 
         return output
 
 
+# class I_GAT(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim, n_heads=1, version=2):
+#         super(I_GAT, self).__init__()
+#         self.input_dim = input_dim
+#         self.hidden_dim = hidden_dim
+#         self.output_dim = output_dim
+#         self.n_heads = n_heads
+#         self.version = version
+
+#         assert n_heads == 1, '目前还没有涉及多头的形式!'
+#         assert version == 2, '目前只有version2的形式! version2指adv信息直接用作权重计算'
+
+#         # Version==1: 根据OA直接生成mask
+#         # Version==2: 与E_GAT共享mask, 但是weighted_sum的权重根据OA进行计算而不是Wh TODO 这里的推导明显有问题
+
+        
+#         # 不采用多头的形式
+#         self.W = nn.Parameter(torch.Tensor(input_dim, hidden_dim))
+#         self.a = nn.Linear(hidden_dim*2, 1, bias=False)
+#         self.act = nn.LeakyReLU(negative_slope=0.2)
+#         # self.out_attn = nn.Linear(hidden_dim, output_dim)
+
+
+#     def init_parameters(self):
+#         for param in self.parameters():
+#             stdv = 1. / math.sqrt(param.size(-1))
+#             param.data.uniform_(-stdv, stdv)
+    
+#     def forward(self, h, message, mask):
+#         if self.version == 2:
+#             return self.forward_version2(h, message, mask)
+
+#     def forward_version2(self, h, message, mask):
+#         # h        [input_dim]   
+#         # Message  [n_agent, input_dim]   
+#         # mask     [n_agent]    e.g: mask = torch.randint(0,2, (n_agent,))  
+#         # MASK  mask 只保留距离内的 + 同类的，排除掉自己
+#         n_agent = message.shape[0]
+
+#         # 自身信息
+#         h = torch.matmul(h, self.W)                #  (hidden_dim）
+#         h_repeat = repeat_at(h, 0, n_agent)         #  (n_agent, hidden_dim）
+
+#         # 接收到的观测信息（理论上应该是mask掉的，但是此处没有）
+#         H = torch.matmul(message, self.W)          # （n_agent, hidden_dim）
+        
+#         # 求权重(记得最后还得mask一遍)
+#         H_cat = torch.cat((h_repeat, H), dim=-1)   # （n_agent, hidden_dim * 2）
+#         E = self.a(H_cat)                               # （n_agent, 1）
+#         E = self.act(E)
+#         E_mask = E * mask.unsqueeze(-1) 
+#         alpha = F.softmax(E_mask, dim=0)                    # （n_agent, 1）
+#         alpha_mask = alpha * mask.unsqueeze(-1)         # （n_agent, 1）
+#         # 为了在这里解决 0*nan = nan 的问题，输入必须将nan转化为0
+#         alpha_mask = torch.nan_to_num(alpha_mask, 0)
+
+#         weighted_sum = torch.mul(alpha_mask, H).sum(dim=0)  #  (hidden_dim）
+#         # H_E = self.out_attn(h + weighted_sum)
+#         H_E = F.elu(h + weighted_sum)
+
+#         return H_E
 
 
 
