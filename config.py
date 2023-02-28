@@ -110,3 +110,6 @@ class GlobalConfig(object): # ADD_TO_CONF_SYSTEM //DO NOT remove this comment//
     machine_info = 'auto load, do not change this var!'
     remote_server_ops = ""
     # KEY = {"addr": None, "usr":None, "pwd":None}        # data storage server ip addr, username and password
+
+    save_model = False
+    save_model_interval = 20000
