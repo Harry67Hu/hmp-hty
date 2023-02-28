@@ -1,12 +1,12 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "4thEXP-PGAT_mappo_twoflow-uhmap50vs50",// http://localhost:59547
+        "note": "4th-PGAT_mappo_twoflow_coupling-uhmap50vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
         "draw_mode": "Img",
-        "num_threads": 24,  // 请预留 num_threads * 1 GB 的内存空间
+        "num_threads": 16,  // 请预留 num_threads * 1 GB 的内存空间
         "report_reward_interval": 128,
         "test_interval": 1280,
         "test_epoch": 512,

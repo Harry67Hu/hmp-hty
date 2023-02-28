@@ -41,7 +41,7 @@ class Net(nn.Module):
         
         # # # # # # # # # #  actor-critic share # # # # # # # # # # # #
         self.obs_encoder = nn.Sequential(nn.Linear(rawob_dim, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, h_dim))
-        # self.attention_layer = SimpleAttention(h_dim=h_dim)
+        self.attention_layer = SimpleAttention(h_dim=h_dim)
         # # # # # # # # # #        actor        # # # # # # # # # # # #
         _size = n_entity * h_dim
         self.policy_head = nn.Sequential(
@@ -81,7 +81,7 @@ class Net(nn.Module):
         
         # # # # # # # # # # actor-critic share # # # # # # # # # # # #
         baec = self.obs_encoder(obs)
-        # baec = self.attention_layer(k=baec,q=baec,v=baec, mask=mask_dead)
+        baec = self.attention_layer(k=baec,q=baec,v=baec, mask=mask_dead)
 
         # # # # # # # # # # actor # # # # # # # # # # # #
         at_bac = my_view(baec,[0,0,-1])

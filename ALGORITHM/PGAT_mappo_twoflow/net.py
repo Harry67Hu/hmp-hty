@@ -134,7 +134,8 @@ class Net(nn.Module):
 
         else: 
             self.AT_obs_encoder = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, h_dim), nn.ReLU(inplace=True), nn.Linear(h_dim, obs_h_dim))
-            self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
+            # self.AT_obs_abstractor = nn.Sequential(nn.Linear(rawob_dim  * self.n_entity_placeholder, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
+            self.AT_obs_abstractor = nn.Sequential(nn.Linear(obs_h_dim, obs_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(obs_abs_h_dim, obs_abs_h_dim))
             self.AT_act_abstractor = nn.Sequential(nn.Linear(act_dim, act_abs_h_dim), nn.ReLU(inplace=True), nn.Linear(act_abs_h_dim, act_abs_h_dim))
 
         # actor network construction ***
@@ -221,7 +222,7 @@ class Net(nn.Module):
         h_obs = self.AT_obs_encoder(obs)
         
         # 环境策略建议部分
-        abstract_obs = self.AT_obs_abstractor(obs)
+        abstract_obs = self.AT_obs_abstractor(h_obs)
         abstract_act = self.AT_act_abstractor(act)
         abstract_cat = torch.cat((abstract_obs, abstract_act), -1)
         gru_input = F.relu(self.fc1_rnn(abstract_cat))
