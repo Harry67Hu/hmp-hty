@@ -127,10 +127,6 @@ class PPO():
 
     def establish_pytorch_graph(self, flag, sample, n):
         obs = _2tensor(sample['obs'])
-        message_obs = _2tensor(sample['message_obs'])
-        message_adv = _2tensor(sample['message_adv'])
-        action_code = _2tensor(sample['action_code'])
-        type_mask = _2tensor(sample['type_mask'])
         advantage = _2tensor(sample['advantage'])
         action = _2tensor(sample['action'])
         oldPi_actionLogProb = _2tensor(sample['actionLogProb'])
@@ -141,13 +137,9 @@ class PPO():
         batch_agent_size = advantage.shape[0]*advantage.shape[1]
 
         assert flag == 'train'
-        newPi_value, newPi_actionLogProb, entropy, probs, others,_,_ = \
+        newPi_value, newPi_actionLogProb, entropy, probs, others = \
             self.policy_and_critic.evaluate_actions(
                 obs=obs, 
-                act=action_code,
-                message_obs=message_obs,
-                message_adv=message_adv,
-                type_mask = type_mask[0],
                 eval_actions=action, 
                 test_mode=False, 
                 avail_act=avail_act)

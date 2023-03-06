@@ -17,28 +17,9 @@ class AlgorithmConfig:
     TakeRewardAsUnity = False
     use_normalization = True
     add_prob_loss = False
-    wait_norm_stable = True
-
+    n_entity_placeholder = 10
     load_checkpoint = False
     load_specific_checkpoint = ''
-
-    # observation pre-process part
-    use_obs_pro_uhmp = False    # 是否使用特征工程（UHMP）
-    obs_process_h_dim = 32
-    h_dim = 24
-    
-    # obs-act abstract net part
-    act_dim = 64
-    rnn_h_dim = 64
-    obs_abs_h_dim = 128
-    act_abs_h_dim = 64
-
-    # PGAT Net part
-    obs_h_dim = 64
-    adv_h_dim = 64
-    GAT_h_dim = 32
-    H_E_dim = 64
-    H_I_dim = 64
 
     # PPO part
     clip_param = 0.2
@@ -62,17 +43,24 @@ class AlgorithmConfig:
     
     dual_conc = True
 
-    n_entity_placeholder = 11
+    n_entity_placeholder = 'auto load, do not change'
     n_agent = 'auto load, do not change'
     entity_distinct = 'auto load, do not change'
 
     ConfigOnTheFly = True
+
+
+    
 
     policy_resonance = False
 
     use_avail_act = True
     
     debug = False
+
+    # simpleGAT部分
+    add_elu = True
+    add_self = True
     
 def str_array_to_num(str_arr):
     out_arr = []
@@ -97,20 +85,6 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
 
         # change obs format, e.g., converting dead agent obs into NaN
         self.shell_env = ShellEnvWrapper(n_agent, n_thread, space, mcv, self, AlgorithmConfig, GlobalConfig.ScenarioConfig, self.team)
-
-        # heterogeneous agent types & type_mask
-        agent_type_list = [a['type'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
-        self.HeteAgentType = str_array_to_num(agent_type_list)
-        hete_type = np.array(self.HeteAgentType)[self.ScenarioConfig.AGENT_ID_EACH_TEAM[team]]
-        self.type_mask = (hete_type[:, np.newaxis] == hete_type[np.newaxis, :]).astype(np.int) # [n_agent, n_agent]第一个维度为智能体数目维度
-
-        # team mask
-        # agent_team_list = [a['team'] for a in GlobalConfig.ScenarioConfig.SubTaskConfig.agent_list]
-        # team_list_expand = np.expand_dims(agent_team_list, axis=1)
-        # team_list_expand = np.tile(team_list_expand, reps=(1, len(agent_team_list)))
-        # B = np.transpose(team_list_expand)
-        # C = np.equal(team_list_expand, B)
-        # self.team_mask = C.astype(int)
 
         n_actions = len(self.shell_env.action_converter.dictionary_args)
 
@@ -145,20 +119,15 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         if AlgorithmConfig.ConfigOnTheFly:
             self._create_config_fly()
 
-        # Message and Action control (all threads)
-        self.OBS_MESSAGE = None
-        self.ADV_MESSAGE = None
-        self.CODE_ACTION = None
-
 
     def action_making(self, StateRecall, test_mode):
-        assert ('_hook_' not in StateRecall), ('Make sure hook is cleared')
-        assert StateRecall['obs'] is not None, ('Make sure obs is ok')
-        RST = StateRecall['Env-Suffered-Reset'] if 'Env-Suffered-Reset' in StateRecall else np.array([0])
+        # make sure hook is cleared
+        assert ('_hook_' not in StateRecall)
         
         # read obs
         obs, threads_active_flag, avail_act, eprsn = \
-            itemgetter('obs', 'threads_active_flag', 'avail_act', '_EpRsn_')(StateRecall)    
+            itemgetter('obs', 'threads_active_flag', 'avail_act', '_EpRsn_')(StateRecall)
+            
         
         # make sure obs is right
         assert obs is not None, ('Make sure obs is ok')
@@ -170,76 +139,24 @@ class ReinforceAlgorithmFoundation(RLAlgorithmBase):
         eprsn = repeat_at(eprsn, -1, self.n_agent)
         thread_index = np.arange(self.n_thread)[threads_active_flag]
 
-        # Message and action control, 此维度与初始线程维度一致
-        if self.OBS_MESSAGE is None:
-            shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.obs_h_dim]
-            self.OBS_MESSAGE = np.random.rand(*shape)
-        if self.ADV_MESSAGE is None:
-            shape = [obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.adv_h_dim]
-            self.ADV_MESSAGE = np.random.rand(*shape)
-        if self.CODE_ACTION is None:
-            shape = [obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim]
-            self.CODE_ACTION = np.random.rand(*shape)
-
-        target_shape = (obs.shape[0],self.type_mask.shape[0], self.type_mask.shape[1])
-        type_mask_expanded = np.broadcast_to(self.type_mask[np.newaxis, :, :], target_shape)
-
-        # 从上一步存储中提取当前激活线程中的信息
-        previous2now_obs_message = np.zeros([obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.obs_h_dim])
-        previous2now_adv_message = np.zeros([obs.shape[0], self.n_agent, self.n_agent, AlgorithmConfig.adv_h_dim])
-        previous2now_code_action = np.zeros([obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim])
-        j = 0
-        for i, is_active in enumerate(threads_active_flag):
-            if is_active:
-                previous2now_obs_message[j] = self.OBS_MESSAGE[i]
-                previous2now_adv_message[j] = self.ADV_MESSAGE[i]
-                previous2now_code_action[j] = self.CODE_ACTION[i]
-                j += 1
-
-        # make decision 输出的维度均为[n_active_threads, n_active_agents, dim]
+        # make decision
         with torch.no_grad():
-            action, value, action_log_prob, message_obs, message_adv = self.policy.act(obs=obs,
-                                                             act=previous2now_code_action,
-                                                             message_obs=previous2now_obs_message,
-                                                             message_adv=previous2now_adv_message,
-                                                             type_mask=self.type_mask,
+            action, value, action_log_prob = self.policy.act(obs=obs,
                                                              test_mode=test_mode,
                                                              avail_act=avail_act,
                                                              eprsn=eprsn,
                                                              )
-            
-        assert AlgorithmConfig.act_dim > 50, 'action_dim check'
-        action_one_hot = np.eye(AlgorithmConfig.act_dim)[action.flatten()].reshape(obs.shape[0], obs.shape[1], AlgorithmConfig.act_dim)
-        StateRecall['_action_'] = action_one_hot
 
-        assert True, ('总训练的版本而非分别训练')
-        # 如果是分别训练的版本，需要在此处对message信息进行整合[先拼接起来再repeat_at]
-        # 初始message维度:[n_active_threads, n_active_agents, 64]
-
-        # 将当前激活线程中的反馈存储到全线程容器中
-        j = 0
-        for i, is_active in enumerate(threads_active_flag):
-            if is_active:
-                self.OBS_MESSAGE[i] = repeat_at(message_obs[j], 1, obs.shape[1])
-                self.ADV_MESSAGE[i] = repeat_at(message_adv[j], 1, obs.shape[1])
-                self.CODE_ACTION[i] = action_one_hot[j]
-                j += 1
-            
         # commit obs to buffer, vars named like _x_ are aligned, others are not!
         traj_framefrag = {
             "_SKIP_":        ~threads_active_flag,
             "value":         value,
             "avail_act":     avail_act,
             "actionLogProb": action_log_prob,
-            "message_obs":   previous2now_obs_message,
-            "message_adv":   previous2now_adv_message,
-            "action_code":   previous2now_code_action,
-            "type_mask":     type_mask_expanded,
-            "obs":           obs, 
+            "obs":           obs,
             "action":        action,
         }
         if avail_act is not None: traj_framefrag.update({'avail_act':  avail_act})
-
         # deal with rollout later when the reward is ready, leave a hook as a callback here
         if not test_mode: StateRecall['_hook_'] = self.commit_traj_frag(traj_framefrag, req_hook = True)
         return action.copy(), StateRecall
