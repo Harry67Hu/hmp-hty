@@ -24,11 +24,8 @@ runs pymarl2 in a subprocess. This work is ongoing. Currently, HMP can link to a
 Archived code used in our AAAI papers: ```https://github.com/binary-husky/hmp2g/tree/aaai-conc```.
 
 ## Contact us: 
+- Tianyi Hu, CASIA, hutianyi2021@ia.ac.cn，QQ1074410989
 - Qingxu Fu, CASIA, fuqingxu2019@ia.ac.cn，QQ505030475
-- Shijie Wang, CASIA, wangshijie2020@ia.ac.cn
-- Min Chen, CASIA, chenmin2020@ia.ac.cn
-- Tianyi Hu, CASIA, hutianyi2021@ia.ac.cn
-- Yifan Xu, CASIA, xuyifan2021@ia.ac.cn
 - Organization：
     - Institute of Automation, Chinese Academy of Sciences
     - School of Artificial Intelligence, University of Chinese Academy of Sciences
