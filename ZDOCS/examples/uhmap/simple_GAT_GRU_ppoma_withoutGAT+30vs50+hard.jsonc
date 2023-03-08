@@ -1,13 +1,12 @@
-base = """
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "hard-render-ppo_ma_simpleGAT_GRU_init-uhmap30vs50",// http://localhost:59547
+        "note": "hard-EXP-ppo_ma_simpleGAT_GRU_withoutGAT-uhmap30vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
         "draw_mode": "Img",
-        "num_threads": 1,  // 请预留 num_threads * 1 GB 的内存空间
+        "num_threads": 32,  // 请预留 num_threads * 1 GB 的内存空间
         "report_reward_interval": 128,
         "test_interval": 1280,
         "test_epoch": 512,
@@ -17,7 +16,7 @@ base = """
         "max_n_episode": 5000000,
         "fold": 1,
         "backup_files": [
-            "ALGORITHM/ppo_ma_simpleGAT_GRU",
+            "ALGORITHM/ppo_ma_simpleGAT_GRU_withoutGAT",
             "MISSION/uhmap"
         ]
     },
@@ -39,9 +38,9 @@ base = """
         "UhmapVersion":"3.5",
         "UhmapRenderExe": "/home/hmp/UnrealHmapBinary/Version3.5/LinuxNoEditor/UHMP.sh",
         "UhmapServerExe": "/home/hmp/UnrealHmapBinary/Version3.5/LinuxServer/UHMPServer.sh",
-        "TimeDilation": 2, // simulation time speed up, larger is faster
+        "TimeDilation": 64, // simulation time speed up, larger is faster
         "TEAM_NAMES": [
-            "ALGORITHM.ppo_ma_simpleGAT_GRU.foundation->ReinforceAlgorithmFoundation",
+            "ALGORITHM.ppo_ma_simpleGAT_GRU_withoutGAT.foundation->ReinforceAlgorithmFoundation",
             "ALGORITHM.script_ai.uhmap_ls->DummyAlgorithmLinedAttack",
         ]
     },
@@ -141,14 +140,13 @@ base = """
     },
 
     // --- Part3: config ALGORITHM 2/2 --- 
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.shell_env.py->ShellEnvConfig": {
+    "ALGORITHM.ppo_ma_simpleGAT_GRU_withoutGAT.shell_env.py->ShellEnvConfig": {
         "add_avail_act": true
     },
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.foundation.py->AlgorithmConfig": {
-        "train_traj_needed": 1,
+    "ALGORITHM.ppo_ma_simpleGAT_GRU_withoutGAT.foundation.py->AlgorithmConfig": {
+        "train_traj_needed": 32,
         "use_normalization": true,
-        "load_checkpoint": true,
-        //"load_specific_checkpoint": "history_cpt/model_1379_{'win_rate': 0.955078125, 'mean_reward': 4.565820312500001}.pt",
+        "load_specific_checkpoint": "",
         "gamma": 0.99,
         "gamma_in_reward_forwarding": "True",
         "gamma_in_reward_forwarding_value": 0.95,
@@ -162,7 +160,7 @@ base = """
         "add_self": true,
     },
 
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.stage_planner.py->PolicyRsnConfig": {
+    "ALGORITHM.ppo_ma_simpleGAT_GRU_withoutGAT.stage_planner.py->PolicyRsnConfig": {
         "resonance_start_at_update": 1,
         "yita_min_prob": 0.05,
         "yita_max": 0.5,
@@ -172,36 +170,3 @@ base = """
     },
     
 }
-"""
-
-
-import commentjson as json
-import numpy as np
-base_conf = json.loads(base)
-n_run = 1
-n_run_mode = [
-    {
-        "addr": "server.yiteam.tech:12326",
-        "usr": "hmp",
-        "pwd": "hmp"
-    },
-]*n_run
-assert len(n_run_mode)==n_run
-
-sum_note = "db-unknown"
-conf_override = {
-
-    "config.py->GlobalConfig-->seed":       
-        [
-            np.random.randint(0, 10000) for _ in range(n_run)
-        ],
-
-}
-
-if __name__ == '__main__':
-    # copy the experiments
-    import shutil, os
-    shutil.copyfile(__file__, os.path.join(os.path.dirname(__file__), 'batch_experiment_backup.py'))
-    # run experiments remotely
-    from UTIL.batch_exp import run_batch_exp
-    run_batch_exp(sum_note, n_run, n_run_mode, base_conf, conf_override, __file__)
