@@ -1,7 +1,7 @@
 {
     // --- Part1: config HMP core --- 
     "config.py->GlobalConfig": {
-        "note": "hard-EXP-ppo_ma_simpleGAT_GRU_init_again-uhmap30vs50",// http://localhost:59547
+        "note": "hard-EXP-baseline_ppoma_withAction_onlyCritic-uhmap30vs50",// http://localhost:59547
         "env_name": "uhmap",
         "env_path": "MISSION.uhmap",
         // "heartbeat_on": "False",
@@ -11,12 +11,12 @@
         "test_interval": 1280,
         "test_epoch": 512,
         "interested_team": 0,
-        "seed": 10088,
+        "seed": 13756,
         "device": "cuda",
         "max_n_episode": 5000000,
         "fold": 1,
         "backup_files": [
-            "ALGORITHM/ppo_ma_simpleGAT_GRU",
+            "ALGORITHM/ppo_ma_withAction",
             "MISSION/uhmap"
         ]
     },
@@ -26,7 +26,7 @@
     "MISSION.uhmap.uhmap_env_wrapper.py->ScenarioConfig": {
         "N_AGENT_EACH_TEAM": [30, 50], // update N_AGENT_EACH_TEAM
         "MAX_NUM_OPP_OBS": 10,
-        "MAX_NUM_ALL_OBS": 10,
+        "MAX_NUM_ALL_OBS" :10,
         "MaxEpisodeStep": 150,
         "StepGameTime": 0.5,
         "StateProvided": false,
@@ -40,7 +40,7 @@
         "UhmapServerExe": "/home/hmp/UnrealHmapBinary/Version3.5/LinuxServer/UHMPServer.sh",
         "TimeDilation": 64, // simulation time speed up, larger is faster
         "TEAM_NAMES": [
-            "ALGORITHM.ppo_ma_simpleGAT_GRU.foundation->ReinforceAlgorithmFoundation",
+            "ALGORITHM.ppo_ma_withAction.foundation->ReinforceAlgorithmFoundation",
             "ALGORITHM.script_ai.uhmap_ls->DummyAlgorithmLinedAttack",
         ]
     },
@@ -140,11 +140,11 @@
     },
 
     // --- Part3: config ALGORITHM 2/2 --- 
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.shell_env.py->ShellEnvConfig": {
+    "ALGORITHM.ppo_ma_withAction.shell_env.py->ShellEnvConfig": {
         "add_avail_act": true
     },
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.foundation.py->AlgorithmConfig": {
-        "train_traj_needed": 64,
+    "ALGORITHM.ppo_ma_withAction.foundation.py->AlgorithmConfig": {
+        "train_traj_needed": 32,
         "use_normalization": true,
         "load_specific_checkpoint": "",
         "gamma": 0.99,
@@ -156,11 +156,9 @@
         "policy_resonance": false,
         "debug": true,
         "n_entity_placeholder": 21,
-        "add_elu": true,
-        "add_self": true,
     },
 
-    "ALGORITHM.ppo_ma_simpleGAT_GRU.stage_planner.py->PolicyRsnConfig": {
+    "ALGORITHM.ppo_ma_withAction.stage_planner.py->PolicyRsnConfig": {
         "resonance_start_at_update": 1,
         "yita_min_prob": 0.05,
         "yita_max": 0.5,
